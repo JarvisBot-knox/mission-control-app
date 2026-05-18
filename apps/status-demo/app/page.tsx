@@ -14,6 +14,8 @@ type StatusItem = {
   sort_order: number;
 };
 
+export const dynamic = 'force-dynamic';
+
 async function supabase<T>(path: string): Promise<T[]> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -99,4 +101,3 @@ export default async function StatusDemo() {
     </main>
   );
 }
-
