@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.corepack/
+.env
+.env.local
+.env.supabase
+*.tsbuildinfo
+supabase/.temp/

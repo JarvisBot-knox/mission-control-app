@@ -1,0 +1,17 @@
+{
+  "name": "mission-control-app-factory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "collect:dry-run": "node scripts/collect-openclaw.mjs --dry-run",
+    "collect": "node scripts/collect-openclaw.mjs",
+    "supabase:link": "bash scripts/supabase-link.sh",
+    "supabase:push": "bash scripts/supabase-push.sh",
+    "dev:mission-control": "pnpm --filter mission-control dev",
+    "dev:status-demo": "pnpm --filter status-demo dev",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "packageManager": "pnpm@10.0.0"
+}
