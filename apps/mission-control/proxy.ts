@@ -9,7 +9,7 @@ function unauthorized() {
   });
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const expectedUser = process.env.MISSION_CONTROL_USER;
   const expectedPassword = process.env.MISSION_CONTROL_PASSWORD;
 
