@@ -221,6 +221,7 @@ export type DashboardViewModel = {
     appCount: number;
     activeBuilds: number;
     pendingApprovals: number;
+    pendingCommands: number;
     openAlerts: number;
     usageRows: number;
     totalTokens: number;
@@ -245,6 +246,7 @@ export type DashboardViewModel = {
   alerts: AlertRecord[];
   buildJobs: BuildJobRecord[];
   pendingApprovals: ApprovalRecord[];
+  commandRequests: CommandRequestRecord[];
   usage: {
     rows: UsageObservationRecord[];
     estimateNote: string | null;
@@ -264,6 +266,7 @@ type RawDashboardData = {
   alerts: AlertRecord[];
   buildJobs: BuildJobRecord[];
   approvals: ApprovalRecord[];
+  commandRequests: CommandRequestRecord[];
   usageRows: UsageObservationRecord[];
   repairAttempts: RepairAttemptRecord[];
   learningProposals: LearningProposalRecord[];
@@ -296,6 +299,7 @@ export function buildDashboardViewModel(raw: RawDashboardData): DashboardViewMod
   const snapshot = raw.snapshots[0];
   const activeBuildStatuses = new Set(['requested', 'clarifying', 'awaiting_build_approval', 'build_approved', 'building', 'preview_ready', 'awaiting_deploy_approval', 'deploy_approved', 'deploying']);
   const pendingApprovals = raw.approvals.filter((approval) => approval.status === 'pending');
+  const pendingCommands = raw.commandRequests.filter((request) => request.status === 'pending');
   const latestUsageNote = raw.usageRows.find((row) => row.estimate_note)?.estimate_note || null;
 
   return {
@@ -312,6 +316,7 @@ export function buildDashboardViewModel(raw: RawDashboardData): DashboardViewMod
       appCount: raw.apps.length,
       activeBuilds: raw.buildJobs.filter((job) => activeBuildStatuses.has(job.status)).length,
       pendingApprovals: pendingApprovals.length,
+      pendingCommands: pendingCommands.length,
       openAlerts: raw.alerts.length,
       usageRows: raw.usageRows.length,
       totalTokens: sum(raw.usageRows, 'total_tokens'),
@@ -339,6 +344,7 @@ export function buildDashboardViewModel(raw: RawDashboardData): DashboardViewMod
     alerts: raw.alerts,
     buildJobs: raw.buildJobs,
     pendingApprovals,
+    commandRequests: raw.commandRequests,
     usage: {
       rows: raw.usageRows,
       estimateNote: latestUsageNote,
@@ -365,6 +371,7 @@ export async function readMissionControlDashboard(reader = createSupabaseReader(
     repairAttempts,
     learningProposals,
     resources,
+    commandRequests,
   ] = await Promise.all([
     readSection<SystemSnapshotRecord>(reader, 'system snapshots', 'system_snapshots?select=*&order=collected_at.desc&limit=1', readErrors),
     readSection<CronJobRecord>(reader, 'cron jobs', 'cron_jobs?select=*&order=name.asc', readErrors),
@@ -378,6 +385,7 @@ export async function readMissionControlDashboard(reader = createSupabaseReader(
     readSection<RepairAttemptRecord>(reader, 'repair attempts', 'repair_attempts?select=id,stage,attempt_number,status,failure_summary,root_cause_hypothesis,fix_summary,started_at,completed_at,build_jobs(title,slug)&order=started_at.desc&limit=12', readErrors),
     readSection<LearningProposalRecord>(reader, 'learning proposals', 'learning_proposals?select=id,status,title,failure_summary,root_cause,fix_summary,proposed_memory_target,proposed_doc_path,proposed_at&order=proposed_at.desc&limit=12', readErrors),
     readSection<AppResourceRecord>(reader, 'app resources', 'app_resources?select=id,resource_type,provider,name,url,environment,status,created_at&order=created_at.desc&limit=20', readErrors),
+    readSection<CommandRequestRecord>(reader, 'command requests', 'command_requests?select=id,build_job_id,command_type,status,target_type,target_id,risk_category,requested_by_label,requested_at,acknowledgement,result_summary,error_message&order=requested_at.desc&limit=12', readErrors),
   ]);
 
   return buildDashboardViewModel({
@@ -393,6 +401,7 @@ export async function readMissionControlDashboard(reader = createSupabaseReader(
     repairAttempts,
     learningProposals,
     resources,
+    commandRequests,
     readErrors,
   });
 }

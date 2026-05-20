@@ -18,6 +18,10 @@ function latestBuild(dashboard: DashboardViewModel) {
   return dashboard.buildJobs[0] || null;
 }
 
+function latestCommand(dashboard: DashboardViewModel) {
+  return dashboard.commandRequests[0] || null;
+}
+
 function compactStatus(value: string | null | undefined) {
   return value || 'unknown';
 }
@@ -25,6 +29,7 @@ function compactStatus(value: string | null | undefined) {
 export default async function Dashboard() {
   const dashboard = await readMissionControlDashboard();
   const build = latestBuild(dashboard);
+  const command = latestCommand(dashboard);
   const nextCron = dashboard.cronJobs[0];
 
   return (
@@ -51,6 +56,24 @@ export default async function Dashboard() {
         <Link href="/learnings">Learnings</Link>
         {build && <Link href={`/jobs/${build.id}`}>Latest Job</Link>}
       </nav>
+
+      <section className="command-path" aria-label="Telegram to OpenClaw build path">
+        <div className="path-copy">
+          <span className="micro-label">Build Command Loop</span>
+          <h2>Telegram request to Supabase and Vercel execution</h2>
+        </div>
+        <div className="path-steps">
+          <div><span>01</span><strong>Telegram</strong><small>request channel</small></div>
+          <div><span>02</span><strong>OpenClaw</strong><small>command worker</small></div>
+          <div><span>03</span><strong>Supabase</strong><small>state and approvals</small></div>
+          <div><span>04</span><strong>Vercel</strong><small>preview and production</small></div>
+        </div>
+        <div className="path-status">
+          <span className={`status-pill ${dashboard.metrics.pendingCommands ? 'warning' : 'ok'}`}>{dashboard.metrics.pendingCommands} queued</span>
+          <strong>{command?.command_type || 'No command pending'}</strong>
+          <small>{command ? `${command.status} / ${formatDateTime(command.requested_at)}` : 'Queue is clear.'}</small>
+        </div>
+      </section>
 
       <section className="cockpit-stage" aria-labelledby="mission-core">
         <aside className="side-rail left-rail" aria-label="Mission queue">
@@ -129,6 +152,7 @@ export default async function Dashboard() {
           <div className="telemetry-stack">
             <div><span>Sessions</span><strong>{dashboard.health.sessionsActive ?? 'n/a'}</strong></div>
             <div><span>Apps</span><strong>{dashboard.metrics.appCount}</strong></div>
+            <div><span>Commands</span><strong>{dashboard.metrics.pendingCommands}</strong></div>
             <div><span>Usage Rows</span><strong>{dashboard.metrics.usageRows}</strong></div>
             <div><span>Next Cron</span><strong>{nextCron?.name || 'n/a'}</strong></div>
           </div>
