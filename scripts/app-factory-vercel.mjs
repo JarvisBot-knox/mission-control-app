@@ -1,4 +1,187 @@
+#!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { artifactPlan, finalUrlPlan, resourcePlan } from './app-factory-state.mjs';
+
+const POLL_INTERVAL_MS = 10_000;
+const MAX_POLLS = 18; // 3 minutes
+
+function parseArgs(argv) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`);
+    const key = token.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('--')) {
+      flags[key] = true;
+    } else {
+      flags[key] = next;
+      i += 1;
+    }
+  }
+  return flags;
+}
+
+function boolFlag(flags, name) {
+  return flags[name] === true || flags[name] === 'true';
+}
+
+async function vercelFetch(path, options = {}, token, teamId) {
+  const base = 'https://api.vercel.com';
+  const url = new URL(path.startsWith('https://') ? path : `${base}${path}`);
+  if (teamId) url.searchParams.set('teamId', teamId);
+
+  const response = await fetch(url.toString(), {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Vercel ${path} failed: ${response.status} ${body}`);
+  }
+
+  return response.json();
+}
+
+async function supabaseFetch(supabaseUrl, serviceRoleKey, path, options = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase ${path} failed: ${response.status} ${body}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun = false }) {
+  if (!repoName) throw new Error('--repo-name is required');
+
+  const vercelToken = process.env.VERCEL_TOKEN;
+  if (!vercelToken) throw new Error('VERCEL_TOKEN env var is required');
+
+  const teamId = process.env.VERCEL_TEAM_ID || null;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const projectName = repoName;
+  const GITHUB_ORG = 'JarvisBot-knox';
+
+  if (dryRun) {
+    console.log(`[dry-run] Would create Vercel project: ${projectName}`);
+    console.log(`[dry-run] Would link to GitHub repo: ${GITHUB_ORG}/${repoName}`);
+    console.log(`[dry-run] Would trigger ${env} deployment`);
+    console.log(`[dry-run] Would poll until READY or ERROR (max ${MAX_POLLS} polls)`);
+    if (jobId && supabaseUrl && serviceRoleKey) {
+      console.log(`[dry-run] Would record proof_artifacts row for deployment URL`);
+    }
+    return { dryRun: true, deploymentUrl: `https://${projectName}.vercel.app` };
+  }
+
+  console.log(`[vercel] Creating project: ${projectName}`);
+  let project;
+  try {
+    project = await vercelFetch('/v9/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: projectName,
+        gitRepository: {
+          type: 'github',
+          repo: `${GITHUB_ORG}/${repoName}`,
+        },
+        framework: null,
+      }),
+    }, vercelToken, teamId);
+  } catch (error) {
+    if (error.message.includes('already exists') || error.message.includes('409')) {
+      console.log(`[vercel] Project already exists, fetching: ${projectName}`);
+      project = await vercelFetch(`/v9/projects/${encodeURIComponent(projectName)}`, { method: 'GET' }, vercelToken, teamId);
+    } else {
+      throw error;
+    }
+  }
+
+  console.log(`[vercel] Triggering deployment (env: ${env})`);
+  const deployment = await vercelFetch('/v13/deployments', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: projectName,
+      gitSource: {
+        type: 'github',
+        org: GITHUB_ORG,
+        repo: repoName,
+        ref: 'main',
+      },
+      target: env === 'production' ? 'production' : undefined,
+      projectId: project.id,
+    }),
+  }, vercelToken, teamId);
+
+  const deploymentId = deployment.id;
+  console.log(`[vercel] Deployment started: ${deploymentId}`);
+
+  let finalState = deployment.readyState || deployment.status;
+  let deploymentUrl = deployment.url ? `https://${deployment.url}` : null;
+
+  for (let poll = 0; poll < MAX_POLLS; poll += 1) {
+    if (finalState === 'READY' || finalState === 'ERROR' || finalState === 'CANCELED') break;
+    console.log(`[vercel] Polling (${poll + 1}/${MAX_POLLS}) — state: ${finalState}`);
+    await sleep(POLL_INTERVAL_MS);
+    const status = await vercelFetch(`/v13/deployments/${encodeURIComponent(deploymentId)}`, { method: 'GET' }, vercelToken, teamId);
+    finalState = status.readyState || status.status;
+    deploymentUrl = status.url ? `https://${status.url}` : deploymentUrl;
+  }
+
+  if (finalState === 'ERROR' || finalState === 'CANCELED') {
+    throw new Error(`Vercel deployment failed with state: ${finalState}`);
+  }
+
+  if (finalState !== 'READY') {
+    throw new Error(`Vercel deployment timed out after ${MAX_POLLS} polls. Last state: ${finalState}`);
+  }
+
+  console.log(`[vercel] Deployment READY: ${deploymentUrl}`);
+
+  if (jobId && supabaseUrl && serviceRoleKey && deploymentUrl) {
+    const artifactType = env === 'production' ? 'vercel_production_url' : 'vercel_preview_url';
+    await supabaseFetch(supabaseUrl, serviceRoleKey, 'proof_artifacts', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({
+        build_job_id: jobId,
+        artifact_type: artifactType,
+        title: `Vercel ${env} deployment`,
+        url: deploymentUrl,
+        summary: `Deployed ${repoName} to ${env}: ${deploymentUrl}`,
+        metadata: { deploymentId, projectName, env },
+      }),
+    });
+    console.log(`[vercel] Recorded proof_artifacts row`);
+  }
+
+  return { deploymentUrl, deploymentId, projectId: project.id };
+}
+
+// ─── Preserved plan exports (imported by app-factory-static-build.mjs) ───────
 
 export function vercelPreviewPlan(input) {
   if (!input.buildJobId) throw new Error('buildJobId is required');
@@ -91,4 +274,22 @@ export function vercelProductionPlan(input) {
     event: final.event,
     jobPatch: final.jobPatch,
   };
+}
+
+// ─── CLI entry point ──────────────────────────────────────────────────────────
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const flags = parseArgs(process.argv.slice(2));
+
+  deployToVercel({
+    repoName: flags['repo-name'],
+    jobId: flags['job-id'],
+    env: flags.env || 'preview',
+    dryRun: boolFlag(flags, 'dry-run'),
+  })
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
 }
