@@ -6,12 +6,20 @@
   "scripts": {
     "collect:dry-run": "node scripts/collect-openclaw.mjs --dry-run",
     "collect": "node scripts/collect-openclaw.mjs",
+    "app-factory": "node scripts/app-factory-job.mjs",
+    "app-factory:static": "node scripts/app-factory-static-build.mjs",
+    "app-factory:test": "node --test scripts/app-factory-*.test.mjs",
     "supabase:link": "bash scripts/supabase-link.sh",
     "supabase:push": "bash scripts/supabase-push.sh",
     "dev:mission-control": "pnpm --filter mission-control dev",
     "dev:status-demo": "pnpm --filter status-demo dev",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.10"
+    }
   },
   "packageManager": "pnpm@10.0.0"
 }
