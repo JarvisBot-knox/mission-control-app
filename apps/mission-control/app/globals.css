@@ -106,6 +106,15 @@ a:hover {
   background: rgba(97, 232, 255, 0.12);
 }
 
+.section-nav a:focus-visible,
+.detail-nav a:focus-visible,
+.command-button:focus-visible,
+.data-row:focus-visible,
+.detail-meta a:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+
 .depth-grid {
   background:
     linear-gradient(rgba(97, 232, 255, 0.055) 1px, transparent 1px),
@@ -255,6 +264,80 @@ h3 {
   margin: 0 auto 16px;
   max-width: 1540px;
   min-height: clamp(560px, 66vh, 780px);
+}
+
+.command-path {
+  align-items: center;
+  background:
+    linear-gradient(90deg, rgba(97, 232, 255, 0.12), transparent 38%),
+    linear-gradient(270deg, rgba(255, 191, 87, 0.1), transparent 44%),
+    rgba(2, 12, 18, 0.76);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 0 30px rgba(97, 232, 255, 0.04), 0 18px 44px rgba(0, 0, 0, 0.26);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(420px, 1.4fr) minmax(220px, 0.72fr);
+  margin: 0 auto 16px;
+  max-width: 1540px;
+  padding: 14px;
+  position: relative;
+}
+
+.command-path::after {
+  background: linear-gradient(90deg, transparent, var(--cyan-hot), transparent);
+  content: "";
+  height: 1px;
+  left: 14px;
+  position: absolute;
+  right: 14px;
+  top: 0;
+}
+
+.path-copy h2 {
+  font-size: clamp(18px, 1.8vw, 28px);
+  line-height: 1.02;
+  margin-top: 4px;
+}
+
+.path-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.path-steps div {
+  background: rgba(1, 8, 13, 0.58);
+  border: 1px solid rgba(123, 235, 255, 0.14);
+  display: grid;
+  gap: 3px;
+  min-height: 76px;
+  padding: 11px;
+}
+
+.path-steps span {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.path-steps strong,
+.path-status strong {
+  overflow-wrap: anywhere;
+}
+
+.path-steps small,
+.path-status small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.path-status {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
 }
 
 .side-rail {
@@ -836,6 +919,14 @@ h3 {
     min-height: 620px;
   }
 
+  .command-path {
+    grid-template-columns: 1fr;
+  }
+
+  .path-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .strip-panel,
   .strip-panel.wide,
   .detail-panel,
@@ -902,6 +993,10 @@ h3 {
 
   .data-row {
     align-items: flex-start;
+    grid-template-columns: 1fr;
+  }
+
+  .path-steps {
     grid-template-columns: 1fr;
   }
 }

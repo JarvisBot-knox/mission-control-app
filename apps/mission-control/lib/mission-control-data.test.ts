@@ -19,6 +19,7 @@ test('buildDashboardViewModel converts rows into dashboard metrics', () => {
     alerts: [{ id: 'alert-1', severity: 'warning', title: 'Check', status: 'open', created_at: '2026-05-18T03:43:36.800Z' }],
     buildJobs: [{ id: 'job-1', title: 'Demo build', slug: 'demo-build', status: 'building', request_channel: 'telegram', app_type: 'static', proposed_stack: 'Next.js', created_at: '2026-05-18T03:43:36.800Z', updated_at: '2026-05-18T03:43:36.800Z' }],
     approvals: [{ id: 'approval-1', approval_type: 'build', status: 'pending', requested_action: 'Build preview', summary: null, requested_at: '2026-05-18T03:43:36.800Z', build_jobs: { title: 'Demo build', slug: 'demo-build' } }],
+    commandRequests: [{ id: 'command-1', build_job_id: 'job-1', command_type: 'approve_build', status: 'pending', target_type: 'approval', target_id: 'approval-1', risk_category: 'approval_gate', requested_by_label: 'trevor', requested_at: '2026-05-18T03:43:36.800Z', acknowledgement: null, result_summary: null, error_message: null }],
     usageRows: [{ id: 'usage-1', provider: 'openai', model: 'gpt-5.5', input_tokens: 10, output_tokens: 5, cache_read_tokens: 20, cache_write_tokens: 0, total_tokens: 35, estimated_cost: 0, estimate_currency: 'USD', estimate_note: 'observed', observed_at: '2026-05-18T03:43:36.800Z' }],
     repairAttempts: [],
     learningProposals: [],
@@ -30,6 +31,7 @@ test('buildDashboardViewModel converts rows into dashboard metrics', () => {
   assert.equal(dashboard.metrics.appCount, 1);
   assert.equal(dashboard.metrics.activeBuilds, 1);
   assert.equal(dashboard.metrics.pendingApprovals, 1);
+  assert.equal(dashboard.metrics.pendingCommands, 1);
   assert.equal(dashboard.metrics.openAlerts, 1);
   assert.equal(dashboard.metrics.totalTokens, 35);
   assert.equal(dashboard.usage.estimateNote, 'observed');
@@ -45,6 +47,7 @@ test('buildDashboardViewModel handles empty state', () => {
     alerts: [],
     buildJobs: [],
     approvals: [],
+    commandRequests: [],
     usageRows: [],
     repairAttempts: [],
     learningProposals: [],
@@ -69,6 +72,7 @@ test('buildDashboardViewModel does not expose resource secret metadata', () => {
     alerts: [],
     buildJobs: [],
     approvals: [],
+    commandRequests: [],
     usageRows: [],
     repairAttempts: [],
     learningProposals: [],
