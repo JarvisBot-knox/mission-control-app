@@ -172,6 +172,49 @@ Allowed statuses:
 - `failed`
 - `canceled`
 
+### process-command
+
+Processes one pending Mission Control command request by id. This is the narrow OpenClaw command loop for Mission Control buttons.
+
+```bash
+node scripts/app-factory-job.mjs process-command \
+  --command-id "<command_request_id>"
+```
+
+Supported actions:
+
+- `approve_build` / `reject_build`: decides the targeted pending build approval and records an approval timeline event.
+- `approve_deploy` / `reject_deploy`: decides the targeted pending deploy approval and records an approval timeline event.
+- `cancel_job`: marks the job canceled and records a control event. It does not delete job history.
+- `retry_job`: records a planned surgical repair event. It does not apply arbitrary fixes.
+- `approve_learning` / `reject_learning` / `review_learning`: updates the targeted learning proposal status. It does not write memory automatically.
+
+The command request moves through:
+
+```text
+pending -> acknowledged -> completed
+```
+
+If execution fails after acknowledgement, the request is marked `failed` with the error message.
+
+Use `--dry-run` with `--command-json` to inspect command classification without touching Supabase:
+
+```bash
+node scripts/app-factory-job.mjs process-command \
+  --command-json '{"id":"command-1","command_type":"approve_build","status":"pending","build_job_id":"job-1","target_type":"approval","target_id":"approval-1"}' \
+  --dry-run
+```
+
+### process-commands
+
+Processes the oldest pending Mission Control command requests.
+
+```bash
+node scripts/app-factory-job.mjs process-commands --limit 10
+```
+
+This is the command OpenClaw should run from a controlled worker/cron loop after Mission Control creates requests. It is allowlisted and structured; it is not a shell bridge.
+
 ## Telegram Output Shape
 
 Every command returns JSON with a compact `telegram` field when applicable. Telegram should send that compact field, not the full database payload.

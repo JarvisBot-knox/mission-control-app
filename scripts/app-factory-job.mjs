@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import {
+  assertCommandAllowedForJob,
+  buildApprovalCommandPlan,
+  buildCancelJobPlan,
+  buildLearningCommandPlan,
+  buildRetryJobPlan,
+  buildUnsupportedCommandPlan,
+  classifyCommand,
+} from './app-factory-command-loop.mjs';
+import {
   approvalDecisionPlan,
   artifactPlan,
   commandAcknowledgementPlan,
@@ -93,6 +102,33 @@ async function nextSequence(buildJobId, dryRun) {
   if (dryRun) return 99;
   const rows = await read(`job_step_events?select=sequence&build_job_id=eq.${encodeURIComponent(buildJobId)}&order=sequence.desc&limit=1`);
   return (rows?.[0]?.sequence || 0) + 1;
+}
+
+async function readCommand(commandId) {
+  return (await read(`command_requests?select=*&id=eq.${encodeURIComponent(commandId)}&limit=1`))?.[0] || null;
+}
+
+async function readBuildJob(buildJobId) {
+  if (!buildJobId) return null;
+  return (await read(`build_jobs?select=id,status&id=eq.${encodeURIComponent(buildJobId)}&limit=1`))?.[0] || null;
+}
+
+async function readApprovalForCommand(command) {
+  if (command.target_type === 'approval' && command.target_id) {
+    return (await read(`job_approvals?select=id,build_job_id,approval_type,status&id=eq.${encodeURIComponent(command.target_id)}&limit=1`))?.[0] || null;
+  }
+
+  const approvalType = ['approve_deploy', 'reject_deploy'].includes(command.command_type) ? 'deploy' : 'build';
+  if (!command.build_job_id) return null;
+
+  return (await read([
+    'job_approvals?select=id,build_job_id,approval_type,status',
+    `build_job_id=eq.${encodeURIComponent(command.build_job_id)}`,
+    `approval_type=eq.${encodeURIComponent(approvalType)}`,
+    'status=eq.pending',
+    'order=requested_at.asc',
+    'limit=1',
+  ].join('&')))?.[0] || null;
 }
 
 function dryRunResult(command, plan, operations = []) {
@@ -284,6 +320,118 @@ async function acknowledgeCommand(flags, dryRun) {
   return { telegram: plan.telegram };
 }
 
+async function applyCommandAcknowledgement(commandId, status, message) {
+  const plan = commandAcknowledgementPlan({ commandId, status, message });
+  await patchById('command_requests', commandId, plan.commandPatch);
+  return plan;
+}
+
+async function processCommandRecord(command, dryRun) {
+  const commandKind = classifyCommand(command.command_type);
+
+  if (dryRun) {
+    return dryRunResult('process-command', { telegram: `Would process ${command.command_type}` }, [
+      { table: 'command_requests', id: command.id, patch: { status: 'acknowledged' } },
+      { kind: commandKind, command },
+      { table: 'command_requests', id: command.id, patch: { status: 'completed' } },
+    ]);
+  }
+
+  if (command.status !== 'pending') throw new Error(`Command is not pending: ${command.status}`);
+
+  await applyCommandAcknowledgement(command.id, 'acknowledged', 'OpenClaw accepted this request.');
+
+  try {
+    let telegram;
+
+    if (commandKind === 'approval') {
+      const approval = await readApprovalForCommand(command);
+      if (!approval) throw new Error(`Approval target not found for ${command.command_type}`);
+      const buildJobId = command.build_job_id || approval.build_job_id;
+      assertCommandAllowedForJob(command, await readBuildJob(buildJobId));
+      const sequence = await nextSequence(buildJobId, false);
+      const plan = buildApprovalCommandPlan(command, approval, sequence);
+      await patchById('job_approvals', approval.id, plan.approvalPatch);
+      await patchById('build_jobs', buildJobId, plan.jobPatch);
+      await insert('job_step_events', plan.event);
+      telegram = plan.telegram;
+    } else if (commandKind === 'cancel') {
+      assertCommandAllowedForJob(command, await readBuildJob(command.build_job_id));
+      const sequence = await nextSequence(command.build_job_id, false);
+      const plan = buildCancelJobPlan(command, sequence);
+      await patchById('build_jobs', command.build_job_id, plan.jobPatch);
+      await insert('job_step_events', plan.event);
+      telegram = plan.telegram;
+    } else if (commandKind === 'retry') {
+      assertCommandAllowedForJob(command, await readBuildJob(command.build_job_id));
+      const sequence = await nextSequence(command.build_job_id, false);
+      const plan = buildRetryJobPlan(command, sequence);
+      await insert('job_step_events', plan.event);
+      telegram = plan.telegram;
+    } else if (commandKind === 'learning') {
+      const plan = buildLearningCommandPlan(command);
+      await patchById('learning_proposals', command.target_id, plan.proposalPatch);
+      telegram = plan.telegram;
+    } else {
+      const plan = buildUnsupportedCommandPlan(command);
+      await patchById('command_requests', command.id, plan.commandPatch);
+      return { telegram: plan.telegram, commandId: command.id, status: 'rejected' };
+    }
+
+    await applyCommandAcknowledgement(command.id, 'completed', telegram);
+    return { telegram, commandId: command.id, status: 'completed' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await applyCommandAcknowledgement(command.id, 'failed', message);
+    throw error;
+  }
+}
+
+async function processCommand(flags, dryRun) {
+  if (dryRun) {
+    const command = jsonFlag(flags, 'command-json');
+    if (!command.id) throw new Error('--command-json with an id is required for process-command --dry-run');
+    return processCommandRecord(command, true);
+  }
+
+  const commandId = flags['command-id'];
+  if (!commandId) throw new Error('--command-id is required');
+  const command = await readCommand(commandId);
+  if (!command) throw new Error(`Command request not found: ${commandId}`);
+  return processCommandRecord(command, false);
+}
+
+async function processCommands(flags, dryRun) {
+  if (dryRun) {
+    return {
+      dryRun: true,
+      command: 'process-commands',
+      query: 'command_requests?status=eq.pending&order=requested_at.asc',
+    };
+  }
+
+  const limit = Number(flags.limit || 10);
+  const rows = await read(`command_requests?select=*&status=eq.pending&order=requested_at.asc&limit=${limit}`);
+  const results = [];
+
+  for (const command of rows) {
+    try {
+      results.push(await processCommandRecord(command, false));
+    } catch (error) {
+      results.push({
+        commandId: command.id,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    telegram: results.length ? `Processed ${results.length} Mission Control command request(s).` : 'No pending Mission Control command requests.',
+    results,
+  };
+}
+
 export async function run(argv = process.argv.slice(2)) {
   const { command, flags } = parseArgs(argv);
   const dryRun = boolFlag(flags, 'dry-run');
@@ -298,6 +446,8 @@ export async function run(argv = process.argv.slice(2)) {
     'record-final-url': recordFinalUrl,
     'poll-commands': pollCommands,
     'ack-command': acknowledgeCommand,
+    'process-command': processCommand,
+    'process-commands': processCommands,
   };
 
   const handler = handlers[command];
