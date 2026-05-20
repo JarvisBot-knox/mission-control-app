@@ -73,7 +73,7 @@ async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun = false }) {
+export async function deployToVercel({ repoName, jobId, appSlug, env = 'preview', dryRun = false }) {
   if (!repoName) throw new Error('--repo-name is required');
 
   const vercelToken = process.env.VERCEL_TOKEN;
@@ -83,40 +83,71 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const projectName = repoName;
+  const slug = appSlug || repoName.replace(/^generated-/, '').replace(/-[0-9a-f-]{36}$/, '');
+  const projectName = slug || repoName;
   const GITHUB_ORG = 'JarvisBot-knox';
 
   if (dryRun) {
-    console.log(`[dry-run] Would create Vercel project: ${projectName}`);
-    console.log(`[dry-run] Would link to GitHub repo: ${GITHUB_ORG}/${repoName}`);
+    console.log(`[dry-run] Would check apps table for existing vercel_project_id (slug: ${slug})`);
+    console.log(`[dry-run] Would create or reuse Vercel project: ${projectName}`);
+    console.log(`[dry-run] Would link to GitHub repo: ${GITHUB_ORG}/${projectName}`);
     console.log(`[dry-run] Would trigger ${env} deployment`);
     console.log(`[dry-run] Would poll until READY or ERROR (max ${MAX_POLLS} polls)`);
     if (jobId && supabaseUrl && serviceRoleKey) {
-      console.log(`[dry-run] Would record proof_artifacts row for deployment URL`);
+      console.log(`[dry-run] Would upsert apps row and record proof_artifacts row for deployment URL`);
     }
     return { dryRun: true, deploymentUrl: `https://${projectName}.vercel.app` };
   }
 
-  console.log(`[vercel] Creating project: ${projectName}`);
+  // Check for existing Vercel project in apps table
+  let existingProjectId = null;
+  if (supabaseUrl && serviceRoleKey && slug) {
+    const appRows = await supabaseFetch(supabaseUrl, serviceRoleKey, `apps?select=id,vercel_project_id&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+    if (appRows?.[0]?.vercel_project_id) {
+      existingProjectId = appRows[0].vercel_project_id;
+      console.log(`[vercel] Using existing Vercel project: ${existingProjectId}`);
+    }
+  }
+
   let project;
-  try {
-    project = await vercelFetch('/v9/projects', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: projectName,
-        gitRepository: {
-          type: 'github',
-          repo: `${GITHUB_ORG}/${repoName}`,
-        },
-        framework: null,
-      }),
-    }, vercelToken, teamId);
-  } catch (error) {
-    if (error.message.includes('already exists') || error.message.includes('409')) {
-      console.log(`[vercel] Project already exists, fetching: ${projectName}`);
-      project = await vercelFetch(`/v9/projects/${encodeURIComponent(projectName)}`, { method: 'GET' }, vercelToken, teamId);
-    } else {
-      throw error;
+  if (existingProjectId) {
+    project = await vercelFetch(`/v9/projects/${encodeURIComponent(existingProjectId)}`, { method: 'GET' }, vercelToken, teamId);
+  } else {
+    console.log(`[vercel] Creating project: ${projectName}`);
+    try {
+      project = await vercelFetch('/v9/projects', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: projectName,
+          gitRepository: {
+            type: 'github',
+            repo: `${GITHUB_ORG}/${projectName}`,
+          },
+          framework: null,
+        }),
+      }, vercelToken, teamId);
+    } catch (error) {
+      if (error.message.includes('already exists') || error.message.includes('409')) {
+        console.log(`[vercel] Project already exists, fetching: ${projectName}`);
+        project = await vercelFetch(`/v9/projects/${encodeURIComponent(projectName)}`, { method: 'GET' }, vercelToken, teamId);
+      } else {
+        throw error;
+      }
+    }
+    // Upsert apps row with vercel_project_id
+    if (supabaseUrl && serviceRoleKey && slug) {
+      await supabaseFetch(supabaseUrl, serviceRoleKey, `apps?slug=eq.${encodeURIComponent(slug)}`, {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({
+          name: projectName,
+          slug,
+          app_type: 'generated',
+          vercel_project_id: project.id,
+          status: 'draft',
+        }),
+      });
+      console.log(`[vercel] Upserted apps row with vercel_project_id`);
     }
   }
 
@@ -128,7 +159,7 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
       gitSource: {
         type: 'github',
         org: GITHUB_ORG,
-        repo: repoName,
+        repo: projectName,
         ref: 'main',
       },
       target: env === 'production' ? 'production' : undefined,
@@ -163,19 +194,39 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
 
   if (jobId && supabaseUrl && serviceRoleKey && deploymentUrl) {
     const artifactType = env === 'production' ? 'vercel_production_url' : 'vercel_preview_url';
+    const artifactRow = {
+      build_job_id: jobId,
+      artifact_type: artifactType,
+      title: `Vercel ${env} deployment`,
+      url: deploymentUrl,
+      summary: `Deployed ${projectName} to ${env}: ${deploymentUrl}`,
+      metadata: { deploymentId, projectName, env },
+    };
+    if (env !== 'production') {
+      artifactRow.expires_at = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    }
     await supabaseFetch(supabaseUrl, serviceRoleKey, 'proof_artifacts', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        build_job_id: jobId,
-        artifact_type: artifactType,
-        title: `Vercel ${env} deployment`,
-        url: deploymentUrl,
-        summary: `Deployed ${repoName} to ${env}: ${deploymentUrl}`,
-        metadata: { deploymentId, projectName, env },
-      }),
+      body: JSON.stringify(artifactRow),
     });
     console.log(`[vercel] Recorded proof_artifacts row`);
+  }
+
+  // On production deploy success: upsert apps row with production_url and status=active
+  if (env === 'production' && supabaseUrl && serviceRoleKey && slug && deploymentUrl) {
+    await supabaseFetch(supabaseUrl, serviceRoleKey, `apps?slug=eq.${encodeURIComponent(slug)}`, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({
+        name: projectName,
+        slug,
+        app_type: 'generated',
+        production_url: deploymentUrl,
+        status: 'active',
+      }),
+    });
+    console.log(`[vercel] Upserted apps row with production_url and status=active`);
   }
 
   return { deploymentUrl, deploymentId, projectId: project.id };
@@ -284,6 +335,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   deployToVercel({
     repoName: flags['repo-name'],
     jobId: flags['job-id'],
+    appSlug: flags['app-slug'],
     env: flags.env || 'preview',
     dryRun: boolFlag(flags, 'dry-run'),
   })

@@ -163,6 +163,17 @@ async function createStaticJob(flags, dryRun) {
     ]);
   }
 
+  // Duplicate guard: check for an in-progress build for this slug
+  const slug = plan.buildJob.slug;
+  const title = plan.buildJob.title;
+  const inProgressStatuses = ['requested', 'clarifying', 'awaiting_build_approval', 'build_approved', 'building', 'preview_ready', 'awaiting_deploy_approval', 'deploy_approved', 'deploying'].map(encodeURIComponent).join(',');
+  const existing = await read(`build_jobs?select=id,status&slug=eq.${encodeURIComponent(slug)}&status=in.(${inProgressStatuses})&limit=1`);
+  if (existing?.length) {
+    const row = existing[0];
+    console.log(`TELEGRAM_NOTIFY: Build already in progress for "${title}". Job ID: ${row.id}. Check Mission Control for status.`);
+    return { duplicate: true, existingJobId: row.id, message: `A build for '${title}' is already in progress. Job ID: ${row.id}` };
+  }
+
   const [job] = await insert('build_jobs', plan.buildJob);
   await insert('job_step_events', { ...plan.initialStep, build_job_id: job.id });
   await insert('job_approvals', { ...plan.buildApproval, build_job_id: job.id });
@@ -476,6 +487,62 @@ async function cleanStaleCommands(flags, dryRun) {
   };
 }
 
+async function runHygiene(flags, dryRun) {
+  if (dryRun) {
+    console.log('[dry-run] Would run hygiene cleanup via Supabase RPC run_hygiene_cleanup()');
+    return { dryRun: true };
+  }
+
+  const result = await supabaseFetch('rpc/run_hygiene_cleanup', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+  const summary = Object.entries(result || {})
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => `${k.replace(/_deleted$/, '')}: ${v}`)
+    .join(', ');
+
+  const telegram = summary
+    ? `TELEGRAM_NOTIFY: Daily hygiene complete. Deleted — ${summary}.`
+    : `TELEGRAM_NOTIFY: Daily hygiene complete. Nothing to delete.`;
+
+  console.log(telegram);
+  console.log(JSON.stringify(result, null, 2));
+  return { result, telegram };
+}
+
+async function weeklyCostSummary(flags, dryRun) {
+  if (dryRun) {
+    console.log('[dry-run] Would query usage_observations for the past 7 days and summarize cost by model');
+    return { dryRun: true };
+  }
+
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const rows = await read(`usage_observations?select=model,total_tokens,estimated_cost&observed_at=gte.${encodeURIComponent(since)}`);
+
+  const byModel = {};
+  let grandTokens = 0;
+  let grandCost = 0;
+
+  for (const row of rows || []) {
+    const model = row.model || 'unknown';
+    if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0 };
+    byModel[model].tokens += row.total_tokens || 0;
+    byModel[model].cost += Number(row.estimated_cost || 0);
+    grandTokens += row.total_tokens || 0;
+    grandCost += Number(row.estimated_cost || 0);
+  }
+
+  const breakdown = Object.entries(byModel)
+    .map(([model, { tokens, cost }]) => `${model}: ${tokens.toLocaleString()} tokens / $${cost.toFixed(4)}`)
+    .join('; ');
+
+  const telegram = `TELEGRAM_NOTIFY: Weekly usage summary: ${grandTokens.toLocaleString()} tokens, ~$${grandCost.toFixed(4)}. Breakdown: ${breakdown || 'none'}.`;
+  console.log(telegram);
+  return { grandTokens, grandCost, byModel, telegram };
+}
+
 async function processCommands(flags, dryRun) {
   if (dryRun) {
     return {
@@ -524,6 +591,8 @@ export async function run(argv = process.argv.slice(2)) {
     'process-command': processCommand,
     'process-commands': processCommands,
     'clean-stale-commands': cleanStaleCommands,
+    'run-hygiene': runHygiene,
+    'weekly-cost-summary': weeklyCostSummary,
   };
 
   const handler = handlers[command];

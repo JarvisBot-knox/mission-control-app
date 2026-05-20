@@ -228,7 +228,8 @@ async function runLiveBuild(flags) {
   const title = flags.title || 'Untitled';
   const template = flags.template || 'premium_static_app';
   const slug = flags.slug || slugify(title);
-  const repoName = flags.repo || `generated-${jobId}`;
+  const appSlug = flags['app-slug'] || slug;
+  const repoName = flags.repo || appSlug;
   const outputDir = flags['output-dir'] || `/tmp/jarvis-build-${jobId}`;
   const vars = flags.vars && flags.vars !== true ? flags.vars : '{}';
 
@@ -253,7 +254,7 @@ async function runLiveBuild(flags) {
     // Step 2: GitHub
     currentStep = 'github';
     await runScript(
-      `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId}`,
+      `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId} --app-slug ${appSlug}`,
       false
     );
 
@@ -261,7 +262,7 @@ async function runLiveBuild(flags) {
     currentStep = 'vercel-preview';
     await recordMilestone(jobId, 'preview', 'in_progress', 'Deploying preview', null, null, false);
     const previewOut = await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env preview`,
+      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --app-slug ${appSlug} --env preview`,
       false
     );
     let previewUrl;
@@ -311,7 +312,7 @@ async function runLiveBuild(flags) {
     currentStep = 'vercel-production';
     await recordMilestone(jobId, 'deploy', 'in_progress', 'Deploying to production', null, 'deploying', false);
     const prodOut = await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env production`,
+      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --app-slug ${appSlug} --env production`,
       false
     );
     let productionUrl;
