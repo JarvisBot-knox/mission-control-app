@@ -232,8 +232,18 @@ async function runLiveBuild(flags) {
   const outputDir = flags['output-dir'] || `/tmp/jarvis-build-${jobId}`;
   const vars = flags.vars && flags.vars !== true ? flags.vars : '{}';
 
+  let currentStep = 'build-approval-gate';
   try {
+    // Gate: verify build approval record in Supabase before proceeding
+    const buildApprovalRows = await supabaseFetch(
+      `job_approvals?select=id,status&build_job_id=eq.${encodeURIComponent(jobId)}&approval_type=eq.build&status=eq.approved&limit=1`
+    );
+    if (!buildApprovalRows?.length) {
+      throw new Error(`Build approval record not found in Supabase for job ${jobId}. Cannot proceed.`);
+    }
+
     // Step 1: Generate
+    currentStep = 'generate';
     await recordMilestone(jobId, 'build', 'in_progress', 'Generating site files', template, 'building', false);
     await runScript(
       `node scripts/app-factory-generate.mjs --template ${template} --output-dir ${outputDir} --vars '${vars}'`,
@@ -241,12 +251,14 @@ async function runLiveBuild(flags) {
     );
 
     // Step 2: GitHub
+    currentStep = 'github';
     await runScript(
       `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId}`,
       false
     );
 
     // Step 3: Vercel preview
+    currentStep = 'vercel-preview';
     await recordMilestone(jobId, 'preview', 'in_progress', 'Deploying preview', null, null, false);
     const previewOut = await runScript(
       `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env preview`,
@@ -262,6 +274,7 @@ async function runLiveBuild(flags) {
     await recordMilestone(jobId, 'preview', 'ready', 'Preview ready', previewUrl || repoName, 'preview_ready', false);
 
     // Step 4: Insert deploy approval request
+    currentStep = 'deploy-approval-request';
     await supabaseFetch('command_requests', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
@@ -277,13 +290,25 @@ async function runLiveBuild(flags) {
     });
 
     // Step 5: Poll for deploy approval
+    currentStep = 'deploy-approval-timeout';
     const approval = await pollDeployApproval(jobId);
     if (!approval.approved) {
       await recordMilestone(jobId, 'deploy', 'failed', 'Deploy not approved', approval.reason, 'failed', false);
+      console.error(`TELEGRAM_NOTIFY: Job ${jobId} failed at step deploy-approval-timeout. Error: Deploy not approved — reason: ${approval.reason}. Check Mission Control for details.`);
       return { status: 'not_approved', reason: approval.reason };
     }
 
+    // Gate: verify deploy approval record in Supabase before production deploy
+    currentStep = 'deploy-approval-gate';
+    const deployApprovalRows = await supabaseFetch(
+      `job_approvals?select=id,status&build_job_id=eq.${encodeURIComponent(jobId)}&approval_type=eq.deploy&status=eq.approved&limit=1`
+    );
+    if (!deployApprovalRows?.length) {
+      throw new Error(`Deploy approval record not found in Supabase for job ${jobId}. Cannot proceed.`);
+    }
+
     // Step 6: Vercel production
+    currentStep = 'vercel-production';
     await recordMilestone(jobId, 'deploy', 'in_progress', 'Deploying to production', null, 'deploying', false);
     const prodOut = await runScript(
       `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env production`,
@@ -297,6 +322,7 @@ async function runLiveBuild(flags) {
     }
 
     // Step 7: Record final URL
+    currentStep = 'record-final-url';
     const finalArgs = [
       `node scripts/app-factory-job.mjs record-final-url`,
       `--job-id ${jobId}`,
@@ -308,6 +334,7 @@ async function runLiveBuild(flags) {
     return { status: 'live', productionUrl, previewUrl };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`TELEGRAM_NOTIFY: Job ${jobId} failed at step ${currentStep}. Error: ${message}. Check Mission Control for details.`);
     try {
       await recordMilestone(jobId, 'build', 'failed', 'Build failed', message, 'failed', false);
     } catch {
