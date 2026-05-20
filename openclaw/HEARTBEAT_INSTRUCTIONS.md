@@ -1,5 +1,13 @@
 # OpenClaw HEARTBEAT Instructions
 
+## Repo Sync
+Every 30 minutes, pull the latest changes from GitHub:
+```
+Run: cd /Users/knoxbot/mission-control-app-factory && git pull origin main
+If there are new commits, log what changed and notify Telegram:
+TELEGRAM_NOTIFY: Mission Control updated — pulled {commit count} new commit(s). Latest: {latest commit message}.
+```
+
 Add these entries to ~/.openclaw/HEARTBEAT.md on the Mac Mini.
 These run on OpenClaw's 30-minute schedule.
 
