@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { artifactPlan, milestonePlan, resourcePlan, slugify } from './app-factory-state.mjs';
-import { visualProofPlan } from './app-factory-visual-proof.mjs';
+import { artifactPlan, milestonePlan, resourcePlan, slugify } from './app-factory-job.mjs';
 import { vercelPreviewPlan, vercelProductionPlan } from './app-factory-vercel.mjs';
+import { run as runGenerate } from './app-factory-generate.mjs';
+import { run as runGithub } from './app-factory-github.mjs';
+import { run as runVercel } from './app-factory-vercel.mjs';
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -33,6 +38,72 @@ function listFlag(flags, name, fallback = []) {
   return String(flags[name]).split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function jsonFlag(flags, name) {
+  if (!flags[name] || flags[name] === true) return {};
+  return JSON.parse(String(flags[name]));
+}
+
+async function supabaseFetch(path, options = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase ${path} failed: ${response.status} ${body}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function insert(table, row) {
+  return supabaseFetch(table, {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(row),
+  });
+}
+
+async function patchById(table, id, patch) {
+  return supabaseFetch(`${table}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(patch),
+  });
+}
+
+async function nextSequence(buildJobId) {
+  const rows = await supabaseFetch(`job_step_events?select=sequence&build_job_id=eq.${encodeURIComponent(buildJobId)}&order=sequence.desc&limit=1`, { method: 'GET' });
+  return (rows?.[0]?.sequence || 0) + 1;
+}
+
+async function waitForDeployApproval(buildJobId, pollMs = 15_000, timeoutMs = 3_600_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const rows = await supabaseFetch(
+      `job_approvals?select=id,status&build_job_id=eq.${encodeURIComponent(buildJobId)}&approval_type=eq.deploy&order=requested_at.desc&limit=1`,
+      { method: 'GET' }
+    );
+    const approval = rows?.[0];
+    if (!approval) throw new Error(`No deploy approval found for job ${buildJobId}`);
+    if (approval.status === 'approved') return approval;
+    if (['rejected', 'canceled', 'expired'].includes(approval.status)) {
+      throw new Error(`Deploy approval ${approval.status} for job ${buildJobId}`);
+    }
+    console.log(`Waiting for deploy approval (current: ${approval.status})...`);
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  throw new Error(`Deploy approval timed out after ${timeoutMs / 1000}s for job ${buildJobId}`);
+}
+
 export function staticVerticalSlicePlan(input) {
   if (!input.buildJobId) throw new Error('buildJobId is required');
   if (!input.title) throw new Error('title is required');
@@ -50,12 +121,6 @@ export function staticVerticalSlicePlan(input) {
     previewUrl: input.previewUrl,
     sourceRef: input.sourceRef || 'main',
     commitSha: input.commitSha || null,
-  });
-  const proof = visualProofPlan({
-    buildJobId: input.buildJobId,
-    previewUrl: input.previewUrl,
-    viewports: input.viewports,
-    artifactBaseUrl: input.artifactBaseUrl || null,
   });
   const production = vercelProductionPlan({
     buildJobId: input.buildJobId,
@@ -113,7 +178,6 @@ export function staticVerticalSlicePlan(input) {
       }).event },
       ...preview.resources.map((row) => ({ table: 'app_resources', row })),
       { table: 'proof_artifacts', row: preview.checkArtifact },
-      ...proof.artifacts.map((row) => ({ table: 'proof_artifacts', row })),
       { table: 'job_step_events', row: milestonePlan({
         buildJobId: input.buildJobId,
         sequence: 4,
@@ -157,34 +221,178 @@ export function staticVerticalSlicePlan(input) {
   };
 }
 
+async function executeStaticBuild(flags) {
+  const jobId = flags['job-id'];
+  if (!jobId) throw new Error('--job-id is required');
+
+  const title = flags.title;
+  if (!title) throw new Error('--title is required');
+
+  const templateId = flags.template || 'premium_static_app';
+  const slug = slugify(flags.slug || title);
+  const repoName = flags.repo || `generated-${jobId}`;
+  const outputDir = flags['output-dir'] || `/tmp/jarvis-build-${jobId}`;
+  const vars = flags.vars ? JSON.parse(String(flags.vars)) : {};
+
+  console.log(`[1/6] Generating site from template: ${templateId}`);
+  await runGenerate([
+    '--template', templateId,
+    '--output-dir', outputDir,
+    '--vars', JSON.stringify({ SITE_TITLE: title, ...vars }),
+  ]);
+
+  const seq2 = await nextSequence(jobId);
+  await insert('job_step_events', milestonePlan({
+    buildJobId: jobId,
+    sequence: seq2,
+    stage: 'build',
+    status: 'completed',
+    title: 'Template generated',
+    detail: `Template: ${templateId}, output: ${outputDir}`,
+    jobStatus: 'building',
+  }).event);
+  await patchById('build_jobs', jobId, { status: 'building' });
+
+  console.log(`[2/6] Creating GitHub repo: ${repoName}`);
+  const githubResult = await runGithub([
+    '--repo-name', repoName,
+    '--source-dir', outputDir,
+    '--job-id', jobId,
+  ]);
+
+  const seq3 = await nextSequence(jobId);
+  await insert('job_step_events', milestonePlan({
+    buildJobId: jobId,
+    sequence: seq3,
+    stage: 'repo',
+    status: 'completed',
+    title: 'GitHub repo created',
+    detail: githubResult.repoUrl,
+  }).event);
+
+  console.log(`[3/6] Deploying Vercel preview`);
+  const previewResult = await runVercel([
+    '--repo-name', repoName,
+    '--job-id', jobId,
+    '--env', 'preview',
+  ]);
+
+  const seq4 = await nextSequence(jobId);
+  await insert('job_step_events', milestonePlan({
+    buildJobId: jobId,
+    sequence: seq4,
+    stage: 'preview',
+    status: 'ready',
+    title: 'Preview deployment ready',
+    detail: previewResult.deploymentUrl,
+    jobStatus: 'preview_ready',
+  }).event);
+  await patchById('build_jobs', jobId, { status: 'preview_ready' });
+
+  await insert('job_approvals', {
+    build_job_id: jobId,
+    approval_type: 'deploy',
+    status: 'pending',
+    risk_category: 'production_deploy',
+    requested_action: `Deploy ${title} to production`,
+    requested_channel: 'telegram',
+    requested_by_label: 'OpenClaw',
+    summary: `Approve production deploy after reviewing ${previewResult.deploymentUrl}.`,
+    metadata: { previewUrl: previewResult.deploymentUrl, repoName },
+  });
+
+  const seq5 = await nextSequence(jobId);
+  await insert('job_step_events', milestonePlan({
+    buildJobId: jobId,
+    sequence: seq5,
+    stage: 'approval',
+    status: 'pending',
+    title: 'Deploy approval requested',
+    detail: `Preview: ${previewResult.deploymentUrl}`,
+    jobStatus: 'awaiting_deploy_approval',
+  }).event);
+  await patchById('build_jobs', jobId, { status: 'awaiting_deploy_approval' });
+
+  console.log(`[4/6] Waiting for deploy approval from Trevor...`);
+  await waitForDeployApproval(jobId);
+
+  console.log(`[5/6] Deploying Vercel production`);
+  const productionResult = await runVercel([
+    '--repo-name', repoName,
+    '--job-id', jobId,
+    '--env', 'production',
+  ]);
+
+  const seq6 = await nextSequence(jobId);
+  await insert('job_step_events', milestonePlan({
+    buildJobId: jobId,
+    sequence: seq6,
+    stage: 'deploy',
+    status: 'live',
+    title: 'Production deployment live',
+    detail: productionResult.deploymentUrl,
+    jobStatus: 'live',
+  }).event);
+  await patchById('build_jobs', jobId, { status: 'live' });
+
+  console.log(`[6/6] Recording final URL`);
+  await insert('app_resources', {
+    build_job_id: jobId,
+    resource_type: 'vercel_production_deployment',
+    provider: 'vercel',
+    name: 'Production deployment',
+    external_id: productionResult.deploymentId,
+    url: productionResult.deploymentUrl,
+    environment: 'production',
+    status: 'live',
+    secret_names: [],
+    metadata: { projectId: productionResult.projectId, repoName },
+  });
+
+  return {
+    jobId,
+    previewUrl: previewResult.deploymentUrl,
+    productionUrl: productionResult.deploymentUrl,
+    repoUrl: githubResult.repoUrl,
+    status: 'live',
+  };
+}
+
 export async function run(argv = process.argv.slice(2)) {
   const { command, flags } = parseArgs(argv);
   const dryRun = boolFlag(flags, 'dry-run');
+
   if (command !== 'plan') throw new Error(`Unsupported static build command: ${command || '(missing)'}`);
-  if (!dryRun) throw new Error('Real static build execution is gated; run with --dry-run for this slice');
 
-  const plan = staticVerticalSlicePlan({
-    buildJobId: flags['job-id'],
-    title: flags.title,
-    slug: flags.slug,
-    templateId: flags.template,
-    templateUrl: flags['template-url'],
-    repoName: flags.repo,
-    repoUrl: flags['repo-url'],
-    vercelProject: flags['vercel-project'],
-    previewUrl: flags['preview-url'],
-    productionUrl: flags['production-url'],
-    artifactBaseUrl: flags['artifact-base-url'],
-    sourceRef: flags['source-ref'],
-    commitSha: flags['commit-sha'],
-    viewports: listFlag(flags, 'viewports', ['desktop', 'mobile']),
-    buildApproved: boolFlag(flags, 'build-approved'),
-    deployApproved: boolFlag(flags, 'deploy-approved'),
-    sourceVerified: boolFlag(flags, 'source-verified'),
-    environmentVerified: boolFlag(flags, 'environment-verified'),
-  });
+  if (dryRun) {
+    const plan = staticVerticalSlicePlan({
+      buildJobId: flags['job-id'],
+      title: flags.title,
+      slug: flags.slug,
+      templateId: flags.template,
+      templateUrl: flags['template-url'],
+      repoName: flags.repo,
+      repoUrl: flags['repo-url'],
+      vercelProject: flags['vercel-project'],
+      previewUrl: flags['preview-url'],
+      productionUrl: flags['production-url'],
+      artifactBaseUrl: flags['artifact-base-url'],
+      sourceRef: flags['source-ref'],
+      commitSha: flags['commit-sha'],
+      viewports: listFlag(flags, 'viewports', ['desktop', 'mobile']),
+      buildApproved: boolFlag(flags, 'build-approved'),
+      deployApproved: boolFlag(flags, 'deploy-approved'),
+      sourceVerified: boolFlag(flags, 'source-verified'),
+      environmentVerified: boolFlag(flags, 'environment-verified'),
+    });
+    return { dryRun: true, command, ...plan };
+  }
 
-  return { dryRun: true, command, ...plan };
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live execution');
+  }
+
+  return executeStaticBuild(flags);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
