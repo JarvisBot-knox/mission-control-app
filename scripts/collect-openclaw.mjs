@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +17,8 @@ const WATCHED_FILES = [
 
 const CRON_JOBS_PATH = '/Users/knoxbot/.openclaw/cron/jobs.json';
 const CRON_STATE_PATH = '/Users/knoxbot/.openclaw/cron/jobs-state.json';
+const SESSIONS_DIR = '/Users/knoxbot/.openclaw/agents/main/sessions';
+const USAGE_SESSION_LIMIT = 120;
 
 const dryRun = process.argv.includes('--dry-run');
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -58,6 +60,10 @@ function toIso(ms) {
   return typeof ms === 'number' && Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
+function toInt(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -76,6 +82,14 @@ async function safeOpenclawJson(label, args) {
 
 async function readJsonFile(path) {
   return JSON.parse(await readFile(path, 'utf8'));
+}
+
+function parseJsonLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -197,6 +211,116 @@ async function readWatchedFile(path) {
   };
 }
 
+function sessionIdFromFile(name) {
+  return name.endsWith('.jsonl') ? name.slice(0, -'.jsonl'.length) : name;
+}
+
+async function listRecentSessionFiles() {
+  const entries = await readdir(SESSIONS_DIR, { withFileTypes: true });
+  const files = await Promise.all(entries
+    .filter((entry) => entry.isFile())
+    .filter((entry) => entry.name.endsWith('.jsonl'))
+    .filter((entry) => !entry.name.endsWith('.trajectory.jsonl'))
+    .map(async (entry) => {
+      const path = join(SESSIONS_DIR, entry.name);
+      const fileStat = await stat(path);
+      return { name: entry.name, path, mtimeMs: fileStat.mtimeMs };
+    }));
+
+  return files
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, USAGE_SESSION_LIMIT);
+}
+
+function usageFromMessage(record) {
+  const usage = record?.message?.usage;
+  if (!usage) return null;
+
+  const input = toInt(usage.input);
+  const output = toInt(usage.output);
+  const cacheRead = toInt(usage.cacheRead);
+  const cacheWrite = toInt(usage.cacheWrite);
+  const total = toInt(usage.totalTokens || usage.total || input + output + cacheRead + cacheWrite);
+
+  if (!total && !input && !output && !cacheRead && !cacheWrite) return null;
+
+  return {
+    provider: record.message.provider || null,
+    model: record.message.model || null,
+    input_tokens: input,
+    output_tokens: output,
+    cache_read_tokens: cacheRead,
+    cache_write_tokens: cacheWrite,
+    total_tokens: total,
+    estimated_cost: typeof usage.cost?.total === 'number' ? usage.cost.total : null,
+    estimate_currency: typeof usage.cost?.total === 'number' ? 'USD' : null,
+  };
+}
+
+function buildUsageRow(file, record) {
+  const usage = usageFromMessage(record);
+  if (!usage) return null;
+
+  const sessionId = sessionIdFromFile(file.name);
+  const messageId = record.id || record.message?.idempotencyKey || sha256(JSON.stringify({
+    timestamp: record.timestamp,
+    parentId: record.parentId,
+    usage,
+  }));
+  const observedAt = record.timestamp || record.message?.timestamp || new Date(file.mtimeMs).toISOString();
+
+  return {
+    external_key: `session-message:${sessionId}:${messageId}`,
+    source: 'openclaw_session',
+    session_id: sessionId,
+    session_key: record.message?.__openclaw?.mirrorIdentity || null,
+    run_id: null,
+    provider: usage.provider,
+    model: usage.model,
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    cache_read_tokens: usage.cache_read_tokens,
+    cache_write_tokens: usage.cache_write_tokens,
+    total_tokens: usage.total_tokens,
+    estimated_cost: usage.estimated_cost,
+    estimate_currency: usage.estimate_currency,
+    estimate_note: 'Observed local OpenClaw session usage. Cost values are estimates when present and may be zero for OAuth-backed models.',
+    observed_at: observedAt,
+    metadata: {
+      messageId,
+      stopReason: record.message?.stopReason || null,
+      role: record.message?.role || null,
+      sessionFile: file.name,
+    },
+  };
+}
+
+async function readUsageObservations() {
+  const files = await listRecentSessionFiles();
+  const rows = [];
+  const errors = [];
+
+  for (const file of files) {
+    try {
+      const text = await readFile(file.path, 'utf8');
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        const record = parseJsonLine(line);
+        if (!record) continue;
+        const row = buildUsageRow(file, record);
+        if (row) rows.push(row);
+      }
+    } catch (error) {
+      errors.push({
+        label: basename(file.path),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { rows, errors, scannedFiles: files.length };
+}
+
 async function collect() {
   const gatewayResult = await safeOpenclawJson('gateway_status', ['gateway', 'status']);
   await sleep(750);
@@ -209,18 +333,41 @@ async function collect() {
       error: error instanceof Error ? error.message : String(error),
     }));
   const files = await Promise.all(WATCHED_FILES.map(readWatchedFile));
-  const sourceErrors = [statusResult, gatewayResult, cronResult]
+  const usageResult = await readUsageObservations()
+    .then((data) => ({ label: 'usage_observations', data, error: null }))
+    .catch((error) => ({
+      label: 'usage_observations',
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  const sourceErrors = [statusResult, gatewayResult, cronResult, usageResult]
     .filter((result) => result.error)
     .map(({ label, error }) => ({ label, error }));
+  const usageRows = usageResult.data?.rows || [];
+  const usageErrors = usageResult.data?.errors || [];
+  if (usageErrors.length) {
+    sourceErrors.push(...usageErrors.map(({ label, error }) => ({ label: `usage:${label}`, error })));
+  }
 
   const systemSnapshot = buildSystemSnapshot(statusResult.data, gatewayResult.data);
   const cronRows = cronResult.data ? buildCronRows(cronResult.data) : [];
+  const usageSummary = {
+    scannedFiles: usageResult.data?.scannedFiles || 0,
+    observations: usageRows.length,
+    totalTokens: usageRows.reduce((sum, row) => sum + row.total_tokens, 0),
+    inputTokens: usageRows.reduce((sum, row) => sum + row.input_tokens, 0),
+    outputTokens: usageRows.reduce((sum, row) => sum + row.output_tokens, 0),
+    cacheReadTokens: usageRows.reduce((sum, row) => sum + row.cache_read_tokens, 0),
+    cacheWriteTokens: usageRows.reduce((sum, row) => sum + row.cache_write_tokens, 0),
+  };
 
   const result = {
     collectedAt: new Date().toISOString(),
     systemSnapshot,
     cronRows,
     watchedFiles: files.map(({ content, ...file }) => file),
+    usageSummary,
+    usageRows,
     sourceErrors,
   };
 
@@ -251,15 +398,21 @@ async function collect() {
     });
   }
 
+  for (const usageRow of usageRows) {
+    await upsert('usage_observations', 'external_key', usageRow);
+  }
+
   await insert('events', {
     source: 'collector',
     event_type: 'collector_run',
     severity: sourceErrors.length ? 'warning' : 'info',
     title: sourceErrors.length ? 'OpenClaw collector completed with warnings' : 'OpenClaw collector completed',
-    detail: `Collected ${cronRows.length} cron jobs and ${files.length} watched files.`,
+    detail: `Collected ${cronRows.length} cron jobs, ${files.length} watched files, and ${usageRows.length} usage observations.`,
     metadata: {
       cronJobs: cronRows.length,
       watchedFiles: files.length,
+      usageObservations: usageRows.length,
+      usageSummary,
       sourceErrors,
     },
   });

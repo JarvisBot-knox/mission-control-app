@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Mission Control',
-  description: 'Private OpenClaw Mission Control dashboard',
+  title: 'JARVIS Mission Control',
+  description: 'Private OpenClaw operator console and app factory dashboard',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -12,4 +12,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

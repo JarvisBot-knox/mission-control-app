@@ -1,269 +1,220 @@
-type AppRecord = {
-  id: string;
-  name: string;
-  slug: string;
-  app_type: string;
-  visibility: string;
-  status: string;
-  production_url: string | null;
-  updated_at: string;
-};
+import Link from 'next/link';
+import { formatDateTime, formatNumber, statusTone } from '../lib/format.ts';
+import { readMissionControlDashboard, type DashboardViewModel } from '../lib/mission-control-data.ts';
+import { JarvisParticleCore } from './components/JarvisParticleCore.tsx';
 
-type DeploymentRecord = {
-  id: string;
-  environment: string;
-  deployment_url: string | null;
-  status: string;
-  started_at: string;
-  apps?: { name: string } | null;
-};
+export const dynamic = 'force-dynamic';
 
-type SystemSnapshot = {
-  gateway_status: string | null;
-  gateway_version: string | null;
-  cli_version: string | null;
-  model: string | null;
-  sessions_active: number | null;
-  collected_at: string;
-};
+const particleIndexes = Array.from({ length: 72 }, (_, index) => index);
 
-type CronJob = {
-  name: string;
-  schedule: string;
-  timezone: string;
-  next_run_text: string | null;
-  last_run_text: string | null;
-  status: string | null;
-  model: string | null;
-};
-
-type WatchedFile = {
-  id: string;
-  label: string;
-  path: string;
-  is_active: boolean;
-  file_snapshots?: Array<{
-    byte_size: number;
-    modified_at: string | null;
-    collected_at: string;
-  }>;
-};
-
-type Alert = {
-  id: string;
-  severity: 'info' | 'warning' | 'critical';
-  title: string;
-  status: string;
-  created_at: string;
-};
-
-async function supabase<T>(path: string): Promise<T[]> {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) return [];
-
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-    },
-    cache: 'no-store',
-  });
-
-  if (!response.ok) {
-    console.error(`Supabase read failed for ${path}: ${response.status}`);
-    return [];
-  }
-
-  return response.json();
+function primarySignal(dashboard: DashboardViewModel) {
+  if (dashboard.metrics.pendingApprovals > 0) return 'Approval gate open';
+  if (dashboard.metrics.activeBuilds > 0) return 'Build sequence active';
+  if (dashboard.metrics.openAlerts > 0) return 'Exception detected';
+  return 'All systems nominal';
 }
 
-function fmt(value: string | null | undefined) {
-  if (!value) return 'n/a';
-  return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Denver',
-  }).format(new Date(value));
+function latestBuild(dashboard: DashboardViewModel) {
+  return dashboard.buildJobs[0] || null;
 }
 
-function statusClass(status?: string | null) {
-  if (status === 'ok' || status === 'active' || status === 'ready') return 'ok';
-  if (status === 'critical' || status === 'failed') return 'critical';
-  return 'warning';
+function compactStatus(value: string | null | undefined) {
+  return value || 'unknown';
 }
 
 export default async function Dashboard() {
-  const [snapshots, cronJobs, files, apps, deployments, alerts] = await Promise.all([
-    supabase<SystemSnapshot>('system_snapshots?select=*&order=collected_at.desc&limit=1'),
-    supabase<CronJob>('cron_jobs?select=*&order=name.asc'),
-    supabase<WatchedFile>('watched_files?select=*,file_snapshots(byte_size,modified_at,collected_at)&is_active=eq.true&order=label.asc&file_snapshots.order=collected_at.desc&file_snapshots.limit=1'),
-    supabase<AppRecord>('apps?select=*&order=updated_at.desc'),
-    supabase<DeploymentRecord>('deployments?select=*,apps(name)&order=started_at.desc&limit=8'),
-    supabase<Alert>('alerts?select=*&status=eq.open&order=created_at.desc&limit=8'),
-  ]);
-
-  const snapshot = snapshots[0];
+  const dashboard = await readMissionControlDashboard();
+  const build = latestBuild(dashboard);
+  const nextCron = dashboard.cronJobs[0];
 
   return (
-    <main className="shell">
-      <header className="topbar">
+    <main className="stark-shell">
+      <div className="depth-grid" aria-hidden="true" />
+      <div className="particle-mesh" aria-hidden="true">
+        {particleIndexes.map((index) => <span key={index} />)}
+      </div>
+
+      <header className="cockpit-header">
         <div>
-          <div className="brand">Mission Control</div>
-          <div className="subtle">OpenClaw App Factory v0.1</div>
+          <span className="micro-label">OpenClaw App Factory</span>
+          <h1>JARVIS Mission Control</h1>
         </div>
-        <div className="subtle">Last snapshot: {fmt(snapshot?.collected_at)}</div>
+        <div className="header-readouts" aria-label="System status">
+          <div><span>Gateway</span><strong>{dashboard.health.gatewayStatus}</strong></div>
+          <div><span>Model</span><strong>{dashboard.health.model}</strong></div>
+          <div><span>Telemetry</span><strong>{formatDateTime(dashboard.health.lastSnapshotAt)}</strong></div>
+        </div>
       </header>
 
-      <div className="content grid">
-        <section className="grid cols-4">
-          <div className="panel metric">
-            <span className="subtle">Gateway</span>
-            <span className={`badge ${statusClass(snapshot?.gateway_status)}`}>{snapshot?.gateway_status || 'unknown'}</span>
+      <nav className="section-nav" aria-label="Mission Control sections">
+        <Link href="/approvals">Approvals</Link>
+        <Link href="/learnings">Learnings</Link>
+        {build && <Link href={`/jobs/${build.id}`}>Latest Job</Link>}
+      </nav>
+
+      <section className="cockpit-stage" aria-labelledby="mission-core">
+        <aside className="side-rail left-rail" aria-label="Mission queue">
+          <div className="rail-head">
+            <span className="micro-label">Priority Queue</span>
+            <strong>{primarySignal(dashboard)}</strong>
           </div>
-          <div className="panel metric">
-            <span className="subtle">Model</span>
-            <span className="metric-value">{snapshot?.model || 'n/a'}</span>
+
+          <article className="rail-module urgent-module">
+            <span className="module-index">01</span>
+            <div>
+              <h2>Approval Gates</h2>
+              <strong>{dashboard.metrics.pendingApprovals}</strong>
+              <p>{dashboard.pendingApprovals[0]?.summary || dashboard.pendingApprovals[0]?.requested_action || 'No human gate waiting.'}</p>
+            </div>
+          </article>
+
+          <article className="rail-module">
+            <span className="module-index">02</span>
+            <div>
+              <h2>Build Sequence</h2>
+              <strong>{dashboard.metrics.activeBuilds}</strong>
+              <p>{build ? `${build.title} / ${build.status}` : 'No active build sequence.'}</p>
+            </div>
+          </article>
+
+          <article className="rail-module">
+            <span className="module-index">03</span>
+            <div>
+              <h2>Exception Stack</h2>
+              <strong>{dashboard.metrics.openAlerts}</strong>
+              <p>{dashboard.alerts[0]?.title || dashboard.readErrors[0]?.section || 'No open alerts.'}</p>
+            </div>
+          </article>
+        </aside>
+
+        <section className="command-core" aria-labelledby="mission-core">
+          <div className="orbital-map" aria-hidden="true">
+            <span className="orbit orbit-a" />
+            <span className="orbit orbit-b" />
+            <span className="orbit orbit-c" />
+            <span className="orbit-node node-build">Build</span>
+            <span className="orbit-node node-usage">Usage</span>
+            <span className="orbit-node node-cron">Cron</span>
+            <span className="orbit-node node-learn">Learn</span>
           </div>
-          <div className="panel metric">
-            <span className="subtle">Sessions</span>
-            <span className="metric-value">{snapshot?.sessions_active ?? 'n/a'}</span>
+
+          <div className="reactor-core-wrap" aria-hidden="true">
+            <JarvisParticleCore />
+            <div className="hologram-vignette" />
           </div>
-          <div className="panel metric">
-            <span className="subtle">Apps</span>
-            <span className="metric-value">{apps.length}</span>
+
+          <div className="core-copy">
+            <span className={`status-pill ${statusTone(dashboard.health.gatewayStatus)}`}>{primarySignal(dashboard)}</span>
+            <h2 id="mission-core">Command core online</h2>
+            <p>Execution remains Telegram-first. This surface is the operating picture: approvals, proof, health, usage, repairs, and learning state.</p>
+          </div>
+
+          <div className="heartbeat-line" aria-label="System heartbeat">
+            <span />
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+            <strong>heartbeat stable</strong>
           </div>
         </section>
 
-        <section className="grid cols-2">
-          <div className="panel">
-            <h2>Cron Jobs</h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Schedule</th>
-                  <th>Last</th>
-                  <th>Next</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cronJobs.map((job) => (
-                  <tr key={job.name}>
-                    <td>{job.name}</td>
-                    <td>{job.schedule} @ {job.timezone}</td>
-                    <td>{fmt(job.last_run_text)}</td>
-                    <td>{fmt(job.next_run_text)}</td>
-                    <td><span className={`badge ${statusClass(job.status)}`}>{job.status || 'unknown'}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <aside className="side-rail right-rail" aria-label="System telemetry">
+          <div className="rail-head">
+            <span className="micro-label">OpenClaw Core</span>
+            <strong>{compactStatus(dashboard.health.gatewayVersion)}</strong>
           </div>
 
-          <div className="panel">
-            <h2>Watched Files</h2>
-            <div className="file-list">
-              {files.map((file) => {
-                const latest = file.file_snapshots?.[0];
-                return (
-                  <div className="file-row" key={file.id}>
-                    <div>
-                      <strong>{file.label}</strong>
-                      <div className="subtle">{file.path}</div>
-                    </div>
-                    <div className="subtle">{latest ? `${latest.byte_size} bytes · ${fmt(latest.modified_at)}` : 'no snapshot'}</div>
-                  </div>
-                );
-              })}
+          <div className="telemetry-stack">
+            <div><span>Sessions</span><strong>{dashboard.health.sessionsActive ?? 'n/a'}</strong></div>
+            <div><span>Apps</span><strong>{dashboard.metrics.appCount}</strong></div>
+            <div><span>Usage Rows</span><strong>{dashboard.metrics.usageRows}</strong></div>
+            <div><span>Next Cron</span><strong>{nextCron?.name || 'n/a'}</strong></div>
+          </div>
+
+          <article className="usage-readout">
+            <span className="micro-label">Token Burn</span>
+            <strong>{formatNumber(dashboard.metrics.totalTokens)}</strong>
+            <div>
+              <span>Input {formatNumber(dashboard.metrics.inputTokens)}</span>
+              <span>Output {formatNumber(dashboard.metrics.outputTokens)}</span>
+              <span>Cache {formatNumber(dashboard.metrics.cacheReadTokens)}</span>
+            </div>
+          </article>
+        </aside>
+      </section>
+
+      <section className="mission-strip" aria-label="Detailed mission state">
+        <article className="strip-panel wide">
+          <div className="strip-head">
+            <span className="micro-label">App Factory</span>
+            <h2>Active Builds</h2>
+          </div>
+          <div className="data-list">
+            {dashboard.buildJobs.map((job) => (
+              <Link className="data-row" href={`/jobs/${job.id}`} key={job.id}>
+                <div><strong>{job.title}</strong><span>{job.slug} / {job.proposed_stack || job.app_type || 'stack pending'}</span></div>
+                <span className={`status-pill ${statusTone(job.status)}`}>{job.status}</span>
+              </Link>
+            ))}
+            {!dashboard.buildJobs.length && <div className="empty-line">No build jobs yet.</div>}
+          </div>
+        </article>
+
+        <article className="strip-panel">
+          <div className="strip-head">
+            <span className="micro-label">Portfolio</span>
+            <h2>Assets</h2>
+          </div>
+          <div className="data-list compact">
+            {dashboard.apps.map((app) => (
+              <Link className="data-row" href={`/apps/${app.id}`} key={app.id}>
+                <div><strong>{app.name}</strong><span>{app.app_type} / {app.visibility}</span></div>
+                <span className={`status-pill ${statusTone(app.status)}`}>{app.status}</span>
+              </Link>
+            ))}
+          </div>
+        </article>
+
+        <article className="strip-panel">
+          <div className="strip-head">
+            <span className="micro-label">Automation</span>
+            <h2>Cron</h2>
+          </div>
+          <div className="data-list compact">
+            {dashboard.cronJobs.slice(0, 4).map((job) => (
+              <div className="data-row pulse-row" key={job.name}>
+                <div><strong>{job.name}</strong><span>{formatDateTime(job.next_run_text)}</span></div>
+                <span className={`status-dot ${statusTone(job.status)}`} />
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="strip-panel wide">
+          <div className="strip-head">
+            <span className="micro-label">Self Improvement</span>
+            <h2>Repair / Learning</h2>
+          </div>
+          <div className="dual-feed">
+            <div>
+              <h3>Repair</h3>
+              {dashboard.repairAttempts.slice(0, 3).map((attempt) => (
+                <div className="feed-line" key={attempt.id}>{attempt.stage} #{attempt.attempt_number} / {attempt.status}</div>
+              ))}
+              {!dashboard.repairAttempts.length && <div className="feed-line">No surgical fixes recorded.</div>}
+            </div>
+            <div>
+              <h3>Learning</h3>
+              {dashboard.learningProposals.slice(0, 3).map((proposal) => (
+                <div className="feed-line" key={proposal.id}>{proposal.title} / {proposal.status}</div>
+              ))}
+              {!dashboard.learningProposals.length && <div className="feed-line">No proposals pending.</div>}
             </div>
           </div>
-        </section>
-
-        <section className="grid cols-2">
-          <div className="panel">
-            <h2>Apps</h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Visibility</th>
-                  <th>Status</th>
-                  <th>URL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {apps.map((app) => (
-                  <tr key={app.id}>
-                    <td>{app.name}</td>
-                    <td>{app.app_type}</td>
-                    <td>{app.visibility}</td>
-                    <td><span className={`badge ${statusClass(app.status)}`}>{app.status}</span></td>
-                    <td>{app.production_url ? <a href={app.production_url}>{app.production_url}</a> : 'n/a'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="panel">
-            <h2>Deployments</h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>App</th>
-                  <th>Env</th>
-                  <th>Status</th>
-                  <th>Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deployments.map((deployment) => (
-                  <tr key={deployment.id}>
-                    <td>{deployment.apps?.name || 'n/a'}</td>
-                    <td>{deployment.environment}</td>
-                    <td><span className={`badge ${statusClass(deployment.status)}`}>{deployment.status}</span></td>
-                    <td>{fmt(deployment.started_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>Open Alerts</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Severity</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((alert) => (
-                <tr key={alert.id}>
-                  <td><span className={`badge ${statusClass(alert.severity)}`}>{alert.severity}</span></td>
-                  <td>{alert.title}</td>
-                  <td>{alert.status}</td>
-                  <td>{fmt(alert.created_at)}</td>
-                </tr>
-              ))}
-              {!alerts.length && (
-                <tr>
-                  <td colSpan={4} className="subtle">No open alerts.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-      </div>
+        </article>
+      </section>
     </main>
   );
 }
-
