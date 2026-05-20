@@ -37,6 +37,13 @@ Once weekly (Monday at 8am):
 Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs weekly-cost-summary
 ```
 
+## Weekly Health Check
+Once weekly (Sunday at 9am):
+```
+Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-healthcheck.mjs
+If degraded URLs are found, Supabase status fields are updated and Telegram is notified automatically.
+```
+
 ## Collector
 Every 30 minutes, snapshot OpenClaw state to Supabase:
 ```

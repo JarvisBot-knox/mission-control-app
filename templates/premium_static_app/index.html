@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{SITE_TITLE}}</title>
+  <style>
+    :root {
+      --primary: {{PRIMARY_COLOR}};
+      --accent: {{ACCENT_COLOR}};
+      --bg: #0a0a0f;
+      --surface: #12131c;
+      --border: rgba(255, 255, 255, 0.08);
+      --ink: #f0f0f5;
+      --muted: #8a8a9a;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    /* ── Nav ── */
+
+    nav {
+      align-items: center;
+      background: rgba(10, 10, 15, 0.88);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 32px;
+      justify-content: space-between;
+      padding: 0 40px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .nav-brand {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      padding: 18px 0;
+    }
+
+    .nav-brand span {
+      color: var(--primary);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 28px;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+
+    .nav-links a:hover {
+      color: var(--ink);
+    }
+
+    .nav-cta {
+      background: var(--primary);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 10px 20px;
+      transition: opacity 0.15s;
+    }
+
+    .nav-cta:hover {
+      color: #fff;
+      opacity: 0.88;
+    }
+
+    /* ── Hero ── */
+
+    .hero {
+      align-items: center;
+      background:
+        radial-gradient(ellipse 60% 50% at 50% -10%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 80%),
+        var(--bg);
+      display: grid;
+      gap: 48px;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 480px);
+      min-height: 580px;
+      padding: 80px 40px;
+    }
+
+    .hero-copy h1 {
+      font-size: clamp(36px, 5vw, 68px);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1.0;
+    }
+
+    .hero-copy h1 em {
+      color: var(--primary);
+      font-style: normal;
+    }
+
+    .hero-copy p {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.7;
+      margin-top: 20px;
+      max-width: 540px;
+    }
+
+    .hero-actions {
+      align-items: center;
+      display: flex;
+      gap: 16px;
+      margin-top: 36px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 14px 28px;
+      transition: opacity 0.15s;
+    }
+
+    .btn-primary:hover {
+      color: #fff;
+      opacity: 0.88;
+    }
+
+    .btn-ghost {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+      padding: 14px 28px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--primary);
+      color: var(--ink);
+    }
+
+    .hero-visual {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      min-height: 320px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero-visual::before {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 20%, transparent), transparent 60%);
+      content: "";
+      inset: 0;
+      position: absolute;
+    }
+
+    .hero-visual-inner {
+      align-items: center;
+      display: flex;
+      height: 100%;
+      justify-content: center;
+      min-height: 320px;
+      position: relative;
+    }
+
+    .visual-placeholder {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ── Features ── */
+
+    .features {
+      border-top: 1px solid var(--border);
+      padding: 80px 40px;
+    }
+
+    .section-label {
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .section-heading {
+      font-size: clamp(28px, 3.5vw, 44px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-top: 12px;
+      max-width: 640px;
+    }
+
+    .features-grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 48px;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: border-color 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: color-mix(in srgb, var(--primary) 50%, transparent);
+    }
+
+    .feature-icon {
+      background: color-mix(in srgb, var(--primary) 14%, transparent);
+      border-radius: 8px;
+      color: var(--primary);
+      font-size: 22px;
+      height: 44px;
+      line-height: 44px;
+      text-align: center;
+      width: 44px;
+    }
+
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-top: 16px;
+    }
+
+    .feature-card p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
+
+    /* ── About / Body ── */
+
+    .about {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 60px;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 460px);
+      padding: 80px 40px;
+    }
+
+    .about-copy h2 {
+      font-size: clamp(26px, 3vw, 40px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-top: 12px;
+    }
+
+    .about-copy p {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+      margin-top: 18px;
+    }
+
+    .about-copy p + p {
+      margin-top: 14px;
+    }
+
+    .about-stats {
+      align-content: center;
+      display: grid;
+      gap: 16px;
+    }
+
+    .stat-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+
+    .stat-card strong {
+      color: var(--primary);
+      display: block;
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .stat-card span {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 5px;
+    }
+
+    /* ── Footer ── */
+
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 40px;
+    }
+
+    .footer-inner {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .footer-brand {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .footer-brand span {
+      color: var(--primary);
+    }
+
+    .footer-copy {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      color: var(--muted);
+      font-size: 13px;
+      transition: color 0.15s;
+    }
+
+    .footer-links a:hover {
+      color: var(--ink);
+    }
+
+    /* ── Responsive ── */
+
+    @media (max-width: 900px) {
+      nav { padding: 0 20px; }
+      .nav-links { display: none; }
+      .hero { grid-template-columns: 1fr; min-height: auto; padding: 60px 20px; }
+      .hero-visual { min-height: 220px; }
+      .features { padding: 60px 20px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .about { grid-template-columns: 1fr; padding: 60px 20px; }
+      footer { padding: 28px 20px; }
+      .footer-inner { flex-direction: column; gap: 16px; text-align: center; }
+      .footer-links { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-brand">{{SITE_TITLE}}</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </div>
+    <a href="#cta" class="nav-cta">{{CTA_LABEL}}</a>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="section-label">{{EYEBROW_LABEL}}</p>
+      <h1>{{HERO_HEADLINE_LINE_1}}<br><em>{{HERO_HEADLINE_LINE_2}}</em></h1>
+      <p>{{HERO_SUBHEADLINE}}</p>
+      <div class="hero-actions">
+        <a href="#cta" class="btn-primary">{{CTA_LABEL}}</a>
+        <a href="#features" class="btn-ghost">Learn more</a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="hero-visual-inner">
+        <span class="visual-placeholder">{{HERO_VISUAL_LABEL}}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <p class="section-label">Why choose us</p>
+    <h2 class="section-heading">{{FEATURES_HEADLINE}}</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">{{FEATURE_1_ICON}}</div>
+        <h3>{{FEATURE_1_TITLE}}</h3>
+        <p>{{FEATURE_1_BODY}}</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">{{FEATURE_2_ICON}}</div>
+        <h3>{{FEATURE_2_TITLE}}</h3>
+        <p>{{FEATURE_2_BODY}}</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">{{FEATURE_3_ICON}}</div>
+        <h3>{{FEATURE_3_TITLE}}</h3>
+        <p>{{FEATURE_3_BODY}}</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="about" id="about">
+    <div class="about-copy">
+      <p class="section-label">About</p>
+      <h2>{{ABOUT_HEADLINE}}</h2>
+      <p>{{ABOUT_BODY_1}}</p>
+      <p>{{ABOUT_BODY_2}}</p>
+    </div>
+    <div class="about-stats">
+      <div class="stat-card">
+        <strong>{{STAT_1_VALUE}}</strong>
+        <span>{{STAT_1_LABEL}}</span>
+      </div>
+      <div class="stat-card">
+        <strong>{{STAT_2_VALUE}}</strong>
+        <span>{{STAT_2_LABEL}}</span>
+      </div>
+      <div class="stat-card">
+        <strong>{{STAT_3_VALUE}}</strong>
+        <span>{{STAT_3_LABEL}}</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">{{SITE_TITLE}}</div>
+      <div class="footer-links">
+        <a href="#features">Features</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+      </div>
+      <p class="footer-copy">&copy; {{COPYRIGHT_YEAR}} {{COPYRIGHT_OWNER}}. All rights reserved.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

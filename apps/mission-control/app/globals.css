@@ -1027,6 +1027,50 @@ h3 {
   position: relative;
 }
 
+/* ─── Alerts banner ─── */
+
+.alerts-banner {
+  display: grid;
+  gap: 8px;
+}
+
+.alert-row {
+  align-items: center;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 10px 14px;
+}
+
+.alert-critical {
+  background: var(--red-dim);
+  border: 1px solid rgba(255, 92, 108, 0.34);
+}
+
+.alert-warning {
+  background: var(--amber-dim);
+  border: 1px solid rgba(255, 191, 87, 0.34);
+}
+
+.alert-info {
+  background: var(--cyan-dim);
+  border: 1px solid rgba(97, 232, 255, 0.22);
+}
+
+.alert-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.alert-ts {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 /* ─── Hero + command prompt ─── */
 
 .jarvis-hero {

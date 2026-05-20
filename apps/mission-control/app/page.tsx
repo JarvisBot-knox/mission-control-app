@@ -5,6 +5,36 @@ import { JarvisParticleCore } from './components/JarvisParticleCore.tsx';
 
 export const dynamic = 'force-dynamic';
 
+const WORKFLOW_STAGES = [
+  { key: 'requested', label: 'Requested', desc: 'User asks for the site from chat.' },
+  { key: 'building', label: 'Building', desc: 'OpenClaw is assembling the build.' },
+  { key: 'preview_ready', label: 'Preview', desc: 'Build complete. Preview URL available.' },
+  { key: 'deploying', label: 'Deploying', desc: 'Deploy approved and running.' },
+  { key: 'live', label: 'Live', desc: 'Site is in production.' },
+] as const;
+
+type WorkflowStageKey = typeof WORKFLOW_STAGES[number]['key'];
+
+const STAGE_ORDER: WorkflowStageKey[] = ['requested', 'building', 'preview_ready', 'deploying', 'live'];
+
+const JOB_STATUS_TO_STAGE: Record<string, WorkflowStageKey> = {
+  requested: 'requested',
+  clarifying: 'requested',
+  awaiting_build_approval: 'building',
+  build_approved: 'building',
+  building: 'building',
+  preview_ready: 'preview_ready',
+  awaiting_deploy_approval: 'preview_ready',
+  deploy_approved: 'deploying',
+  deploying: 'deploying',
+  live: 'live',
+};
+
+function currentStageIndex(jobStatus: string): number {
+  const stageKey = JOB_STATUS_TO_STAGE[jobStatus] ?? 'requested';
+  return STAGE_ORDER.indexOf(stageKey);
+}
+
 function primarySignal(dashboard: DashboardViewModel) {
   if (dashboard.metrics.pendingApprovals > 0) return 'Human gate active';
   if (dashboard.metrics.activeBuilds > 0) return 'Build sequence active';
@@ -38,6 +68,9 @@ export default async function Dashboard() {
   const command = dashboard.commandRequests[0] || null;
   const nextCron = dashboard.cronJobs[0];
   const topApproval = dashboard.pendingApprovals[0];
+  const stageIndex = build ? currentStageIndex(build.status) : -1;
+  const openAlerts = dashboard.alerts.slice(0, 3);
+  const topRepair = dashboard.repairAttempts[0] || null;
 
   return (
     <div className="jarvis-shell">
@@ -62,6 +95,21 @@ export default async function Dashboard() {
       {/* Main content */}
       <main className="jarvis-main">
         <div className="depth-grid" aria-hidden="true" />
+
+        {/* Alerts banner — only shown when alerts exist */}
+        {openAlerts.length > 0 && (
+          <section className="alerts-banner" aria-label="Open alerts">
+            {openAlerts.map((alert) => (
+              <div key={alert.id} className={`alert-row alert-${alert.severity}`}>
+                <span className={`status-pill ${alert.severity === 'critical' ? 'danger' : alert.severity === 'warning' ? 'warn' : 'info'}`}>
+                  {alert.severity}
+                </span>
+                <span className="alert-title">{alert.title}</span>
+                <code className="alert-ts">{formatDateTime(alert.created_at)}</code>
+              </div>
+            ))}
+          </section>
+        )}
 
         {/* Hero + command prompt */}
         <header className="jarvis-hero">
@@ -116,6 +164,18 @@ export default async function Dashboard() {
                 <span className="label-mono">Proof required</span>
                 <strong>Vercel preview URL / build log / artifact hash</strong>
               </div>
+              {dashboard.health.cliVersion && (
+                <div className="ev-row">
+                  <span className="label-mono">CLI version</span>
+                  <strong>{dashboard.health.cliVersion}</strong>
+                </div>
+              )}
+              {dashboard.health.lastSnapshotAt && (
+                <div className="ev-row">
+                  <span className="label-mono">Last snapshot</span>
+                  <strong>{formatDateTime(dashboard.health.lastSnapshotAt)}</strong>
+                </div>
+              )}
             </div>
           </article>
 
@@ -165,7 +225,11 @@ export default async function Dashboard() {
             <div className="metric-card">
               <span className="label-mono">Tokens</span>
               <strong className="metric-num metric-sm">{formatNumber(dashboard.metrics.totalTokens)}</strong>
-              <small>Total burn</small>
+              <small>
+                {dashboard.metrics.estimatedCost != null
+                  ? `~$${dashboard.metrics.estimatedCost.toFixed(2)}`
+                  : 'Total burn'}
+              </small>
             </div>
           </aside>
         </section>
@@ -186,15 +250,20 @@ export default async function Dashboard() {
             </div>
             <div className="panel-body">
               <div className="stations">
-                <div className="station"><span className="status-pill ok">Done</span><h3>Telegram request</h3><p>User asks for the site from chat.</p></div>
-                <div className="station"><span className="status-pill ok">Done</span><h3>Action proposed</h3><p>OpenClaw records structured intent in Supabase.</p></div>
-                <div className={`station ${dashboard.metrics.pendingApprovals ? 'station-now' : ''}`}>
-                  <span className={`status-pill ${dashboard.metrics.pendingApprovals ? 'warn' : 'info'}`}>{dashboard.metrics.pendingApprovals ? 'Now' : 'Gate'}</span>
-                  <h3>Human gate</h3>
-                  <p>Reviewer sees exact command, risk, evidence, and expected outcome.</p>
-                </div>
-                <div className="station"><span className="status-pill info">Next</span><h3>Execute once</h3><p>Processor validates state and runs idempotently.</p></div>
-                <div className="station"><span className="status-pill hot">Verify</span><h3>Proof loop</h3><p>Preview, logs, artifacts, and learning signal recorded.</p></div>
+                {WORKFLOW_STAGES.map((stage, idx) => {
+                  const isDone = stageIndex > idx;
+                  const isNow = stageIndex === idx;
+                  const isPending = stageIndex < idx;
+                  const pillClass = isDone ? 'ok' : isNow ? 'warn' : 'info';
+                  const pillLabel = isDone ? 'Done' : isNow ? 'Now' : isPending ? 'Next' : 'Pending';
+                  return (
+                    <div key={stage.key} className={`station${isNow ? ' station-now' : ''}`}>
+                      <span className={`status-pill ${pillClass}`}>{pillLabel}</span>
+                      <h3>{stage.label}</h3>
+                      <p>{stage.desc}</p>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Current decision */}
@@ -264,12 +333,12 @@ export default async function Dashboard() {
           </article>
         </section>
 
-        {/* Bottom strip: builds + assets + cron */}
+        {/* Bottom strip: recent builds + cron + resources */}
         <section className="jarvis-strip" aria-label="Factory data">
           <article className="strip-card wide-card">
             <div className="strip-head">
               <span className="label-mono">App Factory</span>
-              <h2>Active Builds</h2>
+              <h2>Recent Builds</h2>
             </div>
             <div className="data-list">
               {dashboard.buildJobs.map((job) => (
@@ -284,33 +353,36 @@ export default async function Dashboard() {
 
           <article className="strip-card">
             <div className="strip-head">
-              <span className="label-mono">Portfolio</span>
-              <h2>Assets</h2>
+              <span className="label-mono">Automation</span>
+              <h2>Cron Jobs</h2>
             </div>
             <div className="data-list compact">
-              {dashboard.apps.map((app) => (
-                <Link className="data-row" href={`/apps/${app.id}`} key={app.id}>
-                  <div><strong>{app.name}</strong><span>{app.app_type} / {app.visibility}</span></div>
-                  <span className={`status-pill ${statusTone(app.status)}`}>{app.status}</span>
-                </Link>
+              {dashboard.cronJobs.slice(0, 5).map((job) => (
+                <div className="data-row pulse-row" key={job.name}>
+                  <div><strong>{job.name}</strong><span>{formatDateTime(job.next_run_text)}</span></div>
+                  <span className={`status-dot ${statusTone(job.status ?? 'unknown')}`} />
+                </div>
               ))}
-              {!dashboard.apps.length && <div className="empty-line">No apps yet.</div>}
+              {!dashboard.cronJobs.length && <div className="empty-line">No cron jobs.</div>}
             </div>
           </article>
 
           <article className="strip-card">
             <div className="strip-head">
-              <span className="label-mono">Automation</span>
-              <h2>Cron</h2>
+              <span className="label-mono">Infrastructure</span>
+              <h2>App Resources</h2>
             </div>
             <div className="data-list compact">
-              {dashboard.cronJobs.slice(0, 4).map((job) => (
-                <div className="data-row pulse-row" key={job.name}>
-                  <div><strong>{job.name}</strong><span>{formatDateTime(job.next_run_text)}</span></div>
-                  <span className={`status-dot ${statusTone(job.status)}`} />
+              {dashboard.resources.slice(0, 5).map((res) => (
+                <div className="data-row" key={res.id}>
+                  <div>
+                    <strong>{res.name}</strong>
+                    <span>{res.resource_type} / {res.environment || res.provider}</span>
+                  </div>
+                  <span className={`status-pill ${statusTone(res.status)}`}>{res.status}</span>
                 </div>
               ))}
-              {!dashboard.cronJobs.length && <div className="empty-line">No cron jobs.</div>}
+              {!dashboard.resources.length && <div className="empty-line">No resources tracked.</div>}
             </div>
           </article>
         </section>
@@ -361,8 +433,17 @@ export default async function Dashboard() {
             </article>
           ))}
 
+          {/* Repair attempts */}
+          {topRepair && (
+            <article className="inbox-card" key={topRepair.id}>
+              <span className="status-pill warn">Repair</span>
+              <h3>{topRepair.build_jobs?.title || `Repair attempt #${topRepair.attempt_number}`}</h3>
+              <p>{topRepair.failure_summary || topRepair.fix_summary || `Stage: ${topRepair.stage} / Status: ${topRepair.status}`}</p>
+            </article>
+          )}
+
           {/* Next cron */}
-          {nextCron && (
+          {nextCron && !dashboard.pendingApprovals.length && !dashboard.buildJobs.length && (
             <article className="inbox-card">
               <span className="status-pill info">Setup</span>
               <h3>Next cron: {nextCron.name}</h3>
@@ -370,7 +451,7 @@ export default async function Dashboard() {
             </article>
           )}
 
-          {!dashboard.pendingApprovals.length && !dashboard.buildJobs.length && (
+          {!dashboard.pendingApprovals.length && !dashboard.buildJobs.length && !topRepair && !dashboard.learningProposals.length && (
             <div className="empty-line">No items need your attention.</div>
           )}
         </section>
@@ -382,7 +463,14 @@ export default async function Dashboard() {
           <span className="status-pill ok">Supabase</span>
           <span className="status-pill info">{dashboard.health.model || 'model'}</span>
           {nextCron && <small className="drawer-cron">Next cron: {nextCron.name}</small>}
-          <small className="drawer-cron">Sessions: {dashboard.health.sessionsActive ?? 'n/a'} / Usage rows: {formatNumber(dashboard.metrics.usageRows)}</small>
+          <small className="drawer-cron">
+            Sessions: {dashboard.health.sessionsActive ?? 'n/a'} /
+            Usage rows: {formatNumber(dashboard.metrics.usageRows)} /
+            Alerts: {dashboard.metrics.openAlerts}
+          </small>
+          {dashboard.usage.estimateNote && (
+            <small className="drawer-cron">{dashboard.usage.estimateNote}</small>
+          )}
         </footer>
       </aside>
     </div>
