@@ -52,3 +52,23 @@ test('run dry-run rejects raw secret metadata', async () => {
     '--dry-run',
   ]), /Refusing raw secret-like field/);
 });
+
+test('run dry-run process-command classifies command requests', async () => {
+  const result = await run([
+    'process-command',
+    '--command-json',
+    JSON.stringify({
+      id: 'command-1',
+      command_type: 'approve_build',
+      status: 'pending',
+      build_job_id: 'job-1',
+      target_type: 'approval',
+      target_id: 'approval-1',
+      payload: { note: 'Approved from Mission Control.' },
+    }),
+    '--dry-run',
+  ]);
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.operations[1].kind, 'approval');
+});
