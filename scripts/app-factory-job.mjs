@@ -363,11 +363,44 @@ async function processCommandRecord(command, dryRun) {
       await insert('job_step_events', plan.event);
       telegram = plan.telegram;
     } else if (commandKind === 'retry') {
-      assertCommandAllowedForJob(command, await readBuildJob(command.build_job_id));
-      const sequence = await nextSequence(command.build_job_id, false);
-      const plan = buildRetryJobPlan(command, sequence);
-      await insert('job_step_events', plan.event);
-      telegram = plan.telegram;
+      const jobForRetry = await readBuildJob(command.build_job_id);
+      assertCommandAllowedForJob(command, jobForRetry);
+      if (!jobForRetry || !['failed', 'blocked'].includes(jobForRetry.status)) {
+        const sequence = await nextSequence(command.build_job_id, false);
+        await insert('job_step_events', {
+          build_job_id: command.build_job_id,
+          sequence,
+          stage: 'retry',
+          status: 'rejected',
+          title: 'retry rejected: job is not in a retryable state',
+          detail: `Job status is '${jobForRetry?.status || 'unknown'}'. Only 'failed' or 'blocked' jobs can be retried.`,
+          actor_label: 'OpenClaw',
+        });
+        telegram = `Retry rejected for job ${command.build_job_id}: job is not in a retryable state (status: ${jobForRetry?.status || 'unknown'}).`;
+      } else {
+        await patchById('build_jobs', command.build_job_id, { status: 'build_approved' });
+        const sequence = await nextSequence(command.build_job_id, false);
+        await insert('job_step_events', {
+          build_job_id: command.build_job_id,
+          sequence,
+          stage: 'retry',
+          status: 'initiated',
+          title: 'retry initiated: job reset to build_approved',
+          detail: `Job reset from '${jobForRetry.status}' to 'build_approved' for retry.`,
+          actor_label: 'OpenClaw',
+        });
+        await insert('command_requests', {
+          build_job_id: command.build_job_id,
+          command_type: 'retry_build',
+          status: 'pending',
+          requested_by_label: 'OpenClaw',
+          target_type: 'build_job',
+          target_id: command.build_job_id,
+          result_summary: `Retry queued from command ${command.id}`,
+        });
+        console.log(`[retry] Job ${command.build_job_id} reset to build_approved. New retry_build command queued.`);
+        telegram = `Retry initiated for job ${command.build_job_id}. Job reset to build_approved and queued for next OpenClaw poll.`;
+      }
     } else if (commandKind === 'learning') {
       const plan = buildLearningCommandPlan(command);
       await patchById('learning_proposals', command.target_id, plan.proposalPatch);
@@ -399,6 +432,48 @@ async function processCommand(flags, dryRun) {
   const command = await readCommand(commandId);
   if (!command) throw new Error(`Command request not found: ${commandId}`);
   return processCommandRecord(command, false);
+}
+
+async function cleanStaleCommands(flags, dryRun) {
+  const hours = Number(flags['older-than-hours'] || 24);
+  if (Number.isNaN(hours) || hours <= 0) throw new Error('--older-than-hours must be a positive number');
+
+  if (dryRun) {
+    if (supabaseUrl && serviceRoleKey) {
+      const rows = await read(
+        `command_requests?select=id,command_type,created_at&status=eq.pending&created_at=lt.${encodeURIComponent(new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())}&order=created_at.asc`
+      );
+      console.log(`[dry-run] Would expire ${rows.length} stale pending command(s) older than ${hours}h:`);
+      for (const row of rows) console.log(`  - ${row.id} (${row.command_type}) created ${row.created_at}`);
+      return { dryRun: true, wouldExpire: rows.length, rows };
+    }
+    const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    console.log(`[dry-run] Would query: command_requests where status=pending AND created_at < ${cutoffIso}`);
+    console.log(`[dry-run] Would set: status=expired, decided_at=now(), decision_note='auto-expired: stale pending command'`);
+    return { dryRun: true, olderThanHours: hours, cutoff: cutoffIso };
+  }
+
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const rows = await read(
+    `command_requests?select=id,command_type,created_at&status=eq.pending&created_at=lt.${encodeURIComponent(cutoff)}&order=created_at.asc`
+  );
+
+  for (const row of rows) {
+    await patchById('command_requests', row.id, {
+      status: 'expired',
+      decided_at: new Date().toISOString(),
+      decision_note: 'auto-expired: stale pending command',
+    });
+    console.log(`[expire] ${row.id} (${row.command_type}) created ${row.created_at}`);
+  }
+
+  console.log(`[clean-stale-commands] Expired ${rows.length} stale pending command(s) older than ${hours}h.`);
+  return {
+    telegram: rows.length
+      ? `Expired ${rows.length} stale pending Mission Control command(s) older than ${hours}h.`
+      : `No stale pending Mission Control commands found (threshold: ${hours}h).`,
+    expired: rows.length,
+  };
 }
 
 async function processCommands(flags, dryRun) {
@@ -448,6 +523,7 @@ export async function run(argv = process.argv.slice(2)) {
     'ack-command': acknowledgeCommand,
     'process-command': processCommand,
     'process-commands': processCommands,
+    'clean-stale-commands': cleanStaleCommands,
   };
 
   const handler = handlers[command];
