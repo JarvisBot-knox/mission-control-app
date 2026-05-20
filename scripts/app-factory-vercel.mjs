@@ -1,13 +1,187 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { artifactPlan, finalUrlPlan, resourcePlan } from './app-factory-job.mjs';
+import { artifactPlan, finalUrlPlan, resourcePlan } from './app-factory-state.mjs';
 
-const VERCEL_API = 'https://api.vercel.com';
-const GITHUB_ORG = 'JarvisBot-knox';
 const POLL_INTERVAL_MS = 10_000;
-const POLL_TIMEOUT_MS = 180_000;
+const MAX_POLLS = 18; // 3 minutes
 
-// ─── Plan helpers (used by app-factory-static-build.mjs) ─────────────────────
+function parseArgs(argv) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`);
+    const key = token.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('--')) {
+      flags[key] = true;
+    } else {
+      flags[key] = next;
+      i += 1;
+    }
+  }
+  return flags;
+}
+
+function boolFlag(flags, name) {
+  return flags[name] === true || flags[name] === 'true';
+}
+
+async function vercelFetch(path, options = {}, token, teamId) {
+  const base = 'https://api.vercel.com';
+  const url = new URL(path.startsWith('https://') ? path : `${base}${path}`);
+  if (teamId) url.searchParams.set('teamId', teamId);
+
+  const response = await fetch(url.toString(), {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Vercel ${path} failed: ${response.status} ${body}`);
+  }
+
+  return response.json();
+}
+
+async function supabaseFetch(supabaseUrl, serviceRoleKey, path, options = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase ${path} failed: ${response.status} ${body}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun = false }) {
+  if (!repoName) throw new Error('--repo-name is required');
+
+  const vercelToken = process.env.VERCEL_TOKEN;
+  if (!vercelToken) throw new Error('VERCEL_TOKEN env var is required');
+
+  const teamId = process.env.VERCEL_TEAM_ID || null;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const projectName = repoName;
+  const GITHUB_ORG = 'JarvisBot-knox';
+
+  if (dryRun) {
+    console.log(`[dry-run] Would create Vercel project: ${projectName}`);
+    console.log(`[dry-run] Would link to GitHub repo: ${GITHUB_ORG}/${repoName}`);
+    console.log(`[dry-run] Would trigger ${env} deployment`);
+    console.log(`[dry-run] Would poll until READY or ERROR (max ${MAX_POLLS} polls)`);
+    if (jobId && supabaseUrl && serviceRoleKey) {
+      console.log(`[dry-run] Would record proof_artifacts row for deployment URL`);
+    }
+    return { dryRun: true, deploymentUrl: `https://${projectName}.vercel.app` };
+  }
+
+  console.log(`[vercel] Creating project: ${projectName}`);
+  let project;
+  try {
+    project = await vercelFetch('/v9/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: projectName,
+        gitRepository: {
+          type: 'github',
+          repo: `${GITHUB_ORG}/${repoName}`,
+        },
+        framework: null,
+      }),
+    }, vercelToken, teamId);
+  } catch (error) {
+    if (error.message.includes('already exists') || error.message.includes('409')) {
+      console.log(`[vercel] Project already exists, fetching: ${projectName}`);
+      project = await vercelFetch(`/v9/projects/${encodeURIComponent(projectName)}`, { method: 'GET' }, vercelToken, teamId);
+    } else {
+      throw error;
+    }
+  }
+
+  console.log(`[vercel] Triggering deployment (env: ${env})`);
+  const deployment = await vercelFetch('/v13/deployments', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: projectName,
+      gitSource: {
+        type: 'github',
+        org: GITHUB_ORG,
+        repo: repoName,
+        ref: 'main',
+      },
+      target: env === 'production' ? 'production' : undefined,
+      projectId: project.id,
+    }),
+  }, vercelToken, teamId);
+
+  const deploymentId = deployment.id;
+  console.log(`[vercel] Deployment started: ${deploymentId}`);
+
+  let finalState = deployment.readyState || deployment.status;
+  let deploymentUrl = deployment.url ? `https://${deployment.url}` : null;
+
+  for (let poll = 0; poll < MAX_POLLS; poll += 1) {
+    if (finalState === 'READY' || finalState === 'ERROR' || finalState === 'CANCELED') break;
+    console.log(`[vercel] Polling (${poll + 1}/${MAX_POLLS}) — state: ${finalState}`);
+    await sleep(POLL_INTERVAL_MS);
+    const status = await vercelFetch(`/v13/deployments/${encodeURIComponent(deploymentId)}`, { method: 'GET' }, vercelToken, teamId);
+    finalState = status.readyState || status.status;
+    deploymentUrl = status.url ? `https://${status.url}` : deploymentUrl;
+  }
+
+  if (finalState === 'ERROR' || finalState === 'CANCELED') {
+    throw new Error(`Vercel deployment failed with state: ${finalState}`);
+  }
+
+  if (finalState !== 'READY') {
+    throw new Error(`Vercel deployment timed out after ${MAX_POLLS} polls. Last state: ${finalState}`);
+  }
+
+  console.log(`[vercel] Deployment READY: ${deploymentUrl}`);
+
+  if (jobId && supabaseUrl && serviceRoleKey && deploymentUrl) {
+    const artifactType = env === 'production' ? 'vercel_production_url' : 'vercel_preview_url';
+    await supabaseFetch(supabaseUrl, serviceRoleKey, 'proof_artifacts', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({
+        build_job_id: jobId,
+        artifact_type: artifactType,
+        title: `Vercel ${env} deployment`,
+        url: deploymentUrl,
+        summary: `Deployed ${repoName} to ${env}: ${deploymentUrl}`,
+        metadata: { deploymentId, projectName, env },
+      }),
+    });
+    console.log(`[vercel] Recorded proof_artifacts row`);
+  }
+
+  return { deploymentUrl, deploymentId, projectId: project.id };
+}
+
+// ─── Preserved plan exports (imported by app-factory-static-build.mjs) ───────
 
 export function vercelPreviewPlan(input) {
   if (!input.buildJobId) throw new Error('buildJobId is required');
@@ -24,7 +198,9 @@ export function vercelPreviewPlan(input) {
         name: input.projectName,
         externalId: input.projectId || null,
         status: 'configured',
-        metadata: { framework: input.framework || 'nextjs' },
+        metadata: {
+          framework: input.framework || 'nextjs',
+        },
       }).resource,
       resourcePlan({
         buildJobId: input.buildJobId,
@@ -100,210 +276,20 @@ export function vercelProductionPlan(input) {
   };
 }
 
-// ─── Live deployment (CLI entry point) ───────────────────────────────────────
-
-function parseArgs(argv) {
-  const flags = {};
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (!token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`);
-    const key = token.slice(2);
-    const next = argv[i + 1];
-    if (!next || next.startsWith('--')) {
-      flags[key] = true;
-    } else {
-      flags[key] = next;
-      i++;
-    }
-  }
-  return flags;
-}
-
-async function vercelFetch(path, options = {}) {
-  const token = process.env.VERCEL_TOKEN;
-  if (!token) throw new Error('VERCEL_TOKEN environment variable is required');
-
-  const url = path.startsWith('https://') ? path : `${VERCEL_API}${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Vercel API ${path} failed: ${response.status} ${body}`);
-  }
-
-  return response.json();
-}
-
-async function supabaseFetch(path, options = {}) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    console.warn('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — skipping Supabase record');
-    return null;
-  }
-
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-      ...(options.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Supabase ${path} failed: ${response.status} ${body}`);
-  }
-
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
-}
-
-async function ensureProject(repoName, projectName) {
-  const existing = await vercelFetch(`/v9/projects/${projectName}`).catch(() => null);
-  if (existing?.id) {
-    console.log(`Vercel project already exists: ${existing.id}`);
-    return existing;
-  }
-
-  const project = await vercelFetch('/v9/projects', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: projectName,
-      framework: null,
-      gitRepository: {
-        type: 'github',
-        repo: `${GITHUB_ORG}/${repoName}`,
-      },
-    }),
-  });
-
-  console.log(`Vercel project created: ${project.id}`);
-  return project;
-}
-
-async function triggerDeployment(projectId, repoName, env) {
-  const deployment = await vercelFetch('/v13/deployments', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: repoName,
-      project: projectId,
-      target: env === 'production' ? 'production' : undefined,
-      gitSource: {
-        type: 'github',
-        org: GITHUB_ORG,
-        repo: repoName,
-        ref: 'main',
-      },
-    }),
-  });
-
-  console.log(`Deployment triggered: ${deployment.id} (${deployment.url})`);
-  return deployment;
-}
-
-async function pollDeployment(deploymentId) {
-  const start = Date.now();
-
-  while (Date.now() - start < POLL_TIMEOUT_MS) {
-    const data = await vercelFetch(`/v13/deployments/${deploymentId}`);
-    const state = data.readyState || data.status;
-    console.log(`Deployment ${deploymentId}: ${state}`);
-
-    if (state === 'READY') return data;
-    if (['ERROR', 'CANCELED'].includes(state)) {
-      throw new Error(`Deployment ${deploymentId} ended with state: ${state}`);
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
-
-  throw new Error(`Deployment ${deploymentId} did not complete within ${POLL_TIMEOUT_MS / 1000}s`);
-}
-
-async function main(argv) {
-  const flags = parseArgs(argv);
-
-  const repoName = flags['repo-name'];
-  if (!repoName) throw new Error('--repo-name is required');
-
-  const jobId = flags['job-id'];
-  if (!jobId) throw new Error('--job-id is required');
-
-  const env = flags.env || 'preview';
-  if (!['preview', 'production'].includes(env)) throw new Error('--env must be preview or production');
-
-  const projectName = repoName;
-
-  const project = await ensureProject(repoName, projectName);
-  const deployment = await triggerDeployment(project.id, repoName, env);
-  const ready = await pollDeployment(deployment.id);
-
-  const deploymentUrl = `https://${ready.url}`;
-  const resourceType = env === 'production' ? 'vercel_production_deployment' : 'vercel_preview_deployment';
-
-  await supabaseFetch('proof_artifacts', {
-    method: 'POST',
-    body: JSON.stringify({
-      build_job_id: jobId,
-      deployment_id: ready.id,
-      artifact_type: 'deployment_log',
-      title: `Vercel ${env} deployment`,
-      url: deploymentUrl,
-      summary: `Deployment ${ready.id} reached READY state.`,
-      metadata: {
-        projectId: project.id,
-        deploymentId: ready.id,
-        env,
-        repoName,
-      },
-    }),
-  });
-
-  await supabaseFetch('app_resources', {
-    method: 'POST',
-    body: JSON.stringify({
-      build_job_id: jobId,
-      resource_type: resourceType,
-      provider: 'vercel',
-      name: `${env} deployment`,
-      external_id: ready.id,
-      url: deploymentUrl,
-      environment: env,
-      status: 'ready',
-      secret_names: [],
-      metadata: { projectId: project.id, deploymentId: ready.id, repoName },
-    }),
-  });
-
-  const output = {
-    deploymentId: ready.id,
-    deploymentUrl,
-    projectId: project.id,
-    env,
-    jobId,
-  };
-
-  console.log(JSON.stringify(output, null, 2));
-  return output;
-}
+// ─── CLI entry point ──────────────────────────────────────────────────────────
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-}
+  const flags = parseArgs(process.argv.slice(2));
 
-export { main as run };
+  deployToVercel({
+    repoName: flags['repo-name'],
+    jobId: flags['job-id'],
+    env: flags.env || 'preview',
+    dryRun: boolFlag(flags, 'dry-run'),
+  })
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+}

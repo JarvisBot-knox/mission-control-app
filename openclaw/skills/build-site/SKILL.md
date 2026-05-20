@@ -16,38 +16,35 @@ parameters:
     type: string
     required: false
     default: premium_static_app
-    description: Template to use — premium_static_app, operator_dashboard, or supabase_crud_app
+    description: "Template to use: premium_static_app or operator_dashboard"
 ---
 
-# Build Site Skill
+# Build Site
 
-When Trevor sends a build request via Telegram, this skill creates a new App Factory job, records it in Supabase, and begins the build pipeline.
+Triggered when Trevor sends a site build request via Telegram.
 
-## What This Skill Does
+## Steps
 
-1. Calls `app-factory-job.mjs create-static-job` with the title, description, and template
-2. Returns the job ID and a compact build proposal to Telegram for approval
-3. After approval, calls `app-factory-static-build.mjs` to execute generate → GitHub → Vercel
-4. Reports preview URL back to Telegram when ready
-5. Requests deploy approval before going to production
+1. Call `app-factory-job.mjs create-static-job` with title, description, template
+2. Send compact build proposal to Telegram for approval:
+   - Job: {title}
+   - Template: {template}
+   - Description: {description}
+   - Reply APPROVE to build or CANCEL to abort
+3. On APPROVE: call `app-factory-static-build.mjs` to run the full pipeline
+4. Report preview URL to Telegram when ready
+5. Request deploy approval before production
+6. Report final live URL to Telegram on success
 
 ## CLI Entry Point
 
 ```bash
-node /path/to/mission-control-app/scripts/app-factory-job.mjs create-static-job \
+node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs create-static-job \
   --title "{{title}}" \
   --description "{{description}}" \
   --template "{{template}}"
 ```
 
-## Approval Behavior
+## Error Handling
 
-Always present a compact build proposal to Trevor before executing. Format:
-- Job: {{title}}
-- Template: {{template}}
-- Description: {{description}}
-- Reply APPROVE to build or CANCEL to abort.
-
-## Error Behavior
-
-If any step fails, report the failure to Telegram immediately with the job ID and failed step. Do not silently swallow errors.
+On any failure: message Telegram with job ID and the step that failed. Never silently drop errors.

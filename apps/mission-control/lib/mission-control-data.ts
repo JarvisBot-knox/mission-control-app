@@ -13,11 +13,12 @@ type AppRecord = {
 
 type DeploymentRecord = {
   id: string;
-  environment: string;
-  deployment_url: string | null;
+  resource_type: string;
+  environment: string | null;
+  url: string | null;
   status: string;
-  started_at: string;
-  apps?: { name: string } | null;
+  created_at: string;
+  build_job_id?: string | null;
 };
 
 type SystemSnapshotRecord = {
@@ -377,7 +378,7 @@ export async function readMissionControlDashboard(reader = createSupabaseReader(
     readSection<CronJobRecord>(reader, 'cron jobs', 'cron_jobs?select=*&order=name.asc', readErrors),
     readSection<WatchedFileRecord>(reader, 'watched files', 'watched_files?select=*,file_snapshots(byte_size,modified_at,collected_at)&is_active=eq.true&order=label.asc&file_snapshots.order=collected_at.desc&file_snapshots.limit=1', readErrors),
     readSection<AppRecord>(reader, 'apps', 'apps?select=*&order=updated_at.desc', readErrors),
-    readSection<DeploymentRecord>(reader, 'deployments', 'deployments?select=*,apps(name)&order=started_at.desc&limit=8', readErrors),
+    readSection<DeploymentRecord>(reader, 'deployments', "app_resources?select=id,resource_type,provider,name,url,environment,status,created_at,build_job_id&resource_type=in.(vercel_preview_deployment,vercel_production_deployment,github_repo)&order=created_at.desc&limit=8", readErrors),
     readSection<AlertRecord>(reader, 'alerts', 'alerts?select=*&status=eq.open&order=created_at.desc&limit=8', readErrors),
     readSection<BuildJobRecord>(reader, 'build jobs', 'build_jobs?select=id,title,slug,status,request_channel,app_type,proposed_stack,created_at,updated_at&order=updated_at.desc&limit=12', readErrors),
     readSection<ApprovalRecord>(reader, 'approvals', 'job_approvals?select=id,approval_type,status,requested_action,summary,requested_at,build_jobs(title,slug)&status=eq.pending&order=requested_at.desc&limit=12', readErrors),
@@ -450,7 +451,7 @@ export async function readAppDetail(id: string, reader = createSupabaseReader())
     buildJobs,
   ] = await Promise.all([
     readSection<AppRecord>(reader, 'app detail', `apps?select=*&id=eq.${encodeURIComponent(id)}&limit=1`, readErrors),
-    readSection<DeploymentRecord>(reader, 'app deployments', `deployments?select=*,apps(name)&app_id=eq.${encodeURIComponent(id)}&order=started_at.desc`, readErrors),
+    readSection<DeploymentRecord>(reader, 'app deployments', `app_resources?select=id,resource_type,provider,name,url,environment,status,created_at,build_job_id&app_id=eq.${encodeURIComponent(id)}&resource_type=in.(vercel_preview_deployment,vercel_production_deployment,github_repo)&order=created_at.desc`, readErrors),
     readSection<AppResourceRecord>(reader, 'app resources', `app_resources?select=id,app_id,build_job_id,resource_type,provider,name,url,environment,status,created_at&app_id=eq.${encodeURIComponent(id)}&order=created_at.desc`, readErrors),
     readSection<BuildJobRecord>(reader, 'app build jobs', `build_jobs?select=id,title,slug,status,request_channel,app_type,proposed_stack,created_at,updated_at&app_id=eq.${encodeURIComponent(id)}&order=updated_at.desc`, readErrors),
   ]);
