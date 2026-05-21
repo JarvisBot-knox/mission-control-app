@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,6 +20,15 @@
       --radius: 8px;
     }
 
+    [data-theme="light"] {
+      --bg: #f5f6fa;
+      --surface: #ffffff;
+      --surface-2: #eef0f6;
+      --border: rgba(0, 0, 0, 0.09);
+      --ink: #0d1117;
+      --muted: #57606a;
+    }
+
     * { box-sizing: border-box; }
 
     body {
@@ -28,12 +37,13 @@
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       margin: 0;
       min-height: 100vh;
+      transition: background 0.25s, color 0.25s;
     }
 
     h1, h2, h3, p { margin: 0; }
     a { color: inherit; text-decoration: none; }
 
-    /* ── Header bar ── */
+    /* ── Header ── */
 
     header {
       align-items: center;
@@ -43,6 +53,9 @@
       gap: 16px;
       justify-content: space-between;
       padding: 0 28px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
 
     .header-left {
@@ -58,10 +71,7 @@
       padding: 16px 0;
     }
 
-    .header-logo em {
-      color: var(--primary);
-      font-style: normal;
-    }
+    .header-logo em { color: var(--primary); font-style: normal; }
 
     .header-divider {
       background: var(--border);
@@ -73,6 +83,35 @@
       color: var(--muted);
       font-size: 13px;
       font-weight: 500;
+    }
+
+    .header-right {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+    }
+
+    .header-meta {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+
+    .theme-toggle {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      height: 30px;
+      padding: 0;
+      transition: background 0.2s, border-color 0.2s;
+      width: 30px;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--primary);
     }
 
     .status-indicator {
@@ -111,25 +150,91 @@
       width: 6px;
     }
 
-    .header-right {
-      align-items: center;
-      display: flex;
-      gap: 16px;
+    /* ── Shell layout ── */
+
+    .shell {
+      display: grid;
+      gap: 0;
+      grid-template-columns: 1fr 280px;
+      min-height: calc(100vh - 57px);
     }
 
-    .header-meta {
-      color: var(--muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
-    }
-
-    /* ── Main layout ── */
+    /* ── Main content ── */
 
     .main {
+      border-right: 1px solid var(--border);
       display: grid;
       gap: 20px;
       padding: 24px 28px;
     }
+
+    /* ── Activity feed ── */
+
+    .feed {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 57px);
+      position: sticky;
+      top: 57px;
+    }
+
+    .feed-header {
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      padding: 14px 16px;
+    }
+
+    .feed-header h2 {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .feed-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .feed-list::-webkit-scrollbar { width: 4px; }
+    .feed-list::-webkit-scrollbar-track { background: transparent; }
+    .feed-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .feed-item {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+    }
+
+    .feed-item:last-child { border-bottom: 0; }
+
+    .feed-time {
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-bottom: 3px;
+    }
+
+    .feed-text {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .feed-badge {
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 2px 6px;
+      text-transform: uppercase;
+    }
+
+    .feed-badge.ok { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .feed-badge.warn { background: rgba(210, 153, 34, 0.15); color: var(--amber); }
+    .feed-badge.err { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .feed-badge.info { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); }
 
     /* ── Section heading ── */
 
@@ -148,10 +253,7 @@
       text-transform: uppercase;
     }
 
-    .section-head span {
-      color: var(--muted);
-      font-size: 11px;
-    }
+    .section-head span { color: var(--muted); font-size: 11px; }
 
     /* ── Stat cards ── */
 
@@ -165,7 +267,8 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 18px 20px;
+      overflow: hidden;
+      padding: 18px 20px 14px;
       position: relative;
     }
 
@@ -196,15 +299,36 @@
       margin: 6px 0 4px;
     }
 
-    .stat-delta {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
+    .stat-delta { color: var(--muted); font-size: 12px; }
     .stat-delta.up { color: var(--green); }
     .stat-delta.down { color: var(--red); }
 
-    /* ── Data table section ── */
+    .sparkline-wrap {
+      margin-top: 10px;
+      position: relative;
+    }
+
+    .sparkline {
+      display: block;
+      height: 28px;
+      overflow: visible;
+      width: 100%;
+    }
+
+    .sparkline polyline {
+      fill: none;
+      stroke: var(--primary);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.5;
+    }
+
+    .sparkline .spark-area {
+      fill: color-mix(in srgb, var(--primary) 15%, transparent);
+      stroke: none;
+    }
+
+    /* ── Table section ── */
 
     .table-section {
       background: var(--surface);
@@ -221,10 +345,7 @@
       padding: 14px 18px;
     }
 
-    .table-toolbar h2 {
-      font-size: 13px;
-      font-weight: 700;
-    }
+    .table-toolbar h2 { font-size: 13px; font-weight: 700; }
 
     .table-filters {
       align-items: center;
@@ -237,10 +358,12 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--muted);
+      cursor: pointer;
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.04em;
       padding: 6px 12px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
 
     .filter-pill.active {
@@ -249,14 +372,9 @@
       color: var(--primary);
     }
 
-    .table-wrap {
-      overflow-x: auto;
-    }
+    .table-wrap { overflow-x: auto; }
 
-    table {
-      border-collapse: collapse;
-      width: 100%;
-    }
+    table { border-collapse: collapse; width: 100%; }
 
     thead th {
       border-bottom: 1px solid var(--border);
@@ -271,10 +389,7 @@
       white-space: nowrap;
     }
 
-    thead th:hover {
-      color: var(--ink);
-    }
-
+    thead th:hover { color: var(--ink); }
     thead th.sort-asc::after { content: " ↑"; color: var(--primary); }
     thead th.sort-desc::after { content: " ↓"; color: var(--primary); }
 
@@ -283,13 +398,9 @@
       transition: background 0.1s;
     }
 
-    tbody tr:last-child {
-      border-bottom: 0;
-    }
-
-    tbody tr:hover {
-      background: rgba(255, 255, 255, 0.025);
-    }
+    tbody tr:last-child { border-bottom: 0; }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+    [data-theme="light"] tbody tr:hover { background: rgba(0, 0, 0, 0.025); }
 
     tbody td {
       font-size: 13px;
@@ -302,9 +413,7 @@
       font-size: 12px;
     }
 
-    .cell-muted {
-      color: var(--muted);
-    }
+    .cell-muted { color: var(--muted); }
 
     .badge {
       border: 1px solid currentColor;
@@ -339,19 +448,18 @@
       padding: 12px 16px;
     }
 
-    .pagination {
-      display: flex;
-      gap: 6px;
-    }
+    .pagination { display: flex; gap: 6px; }
 
     .pg-btn {
       background: var(--surface-2);
       border: 1px solid var(--border);
       border-radius: 5px;
       color: var(--muted);
+      cursor: pointer;
       font-size: 12px;
       font-weight: 600;
       padding: 5px 10px;
+      transition: background 0.15s, border-color 0.15s;
     }
 
     .pg-btn.active {
@@ -372,11 +480,7 @@
       padding: 16px 28px;
     }
 
-    footer a {
-      color: var(--muted);
-      transition: color 0.15s;
-    }
-
+    footer a { color: var(--muted); transition: color 0.15s; }
     footer a:hover { color: var(--ink); }
 
     /* ── Animations ── */
@@ -387,6 +491,12 @@
     }
 
     /* ── Responsive ── */
+
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 1fr; }
+      .feed { display: none; }
+      .main { border-right: 0; }
+    }
 
     @media (max-width: 900px) {
       .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -411,106 +521,270 @@
     </div>
     <div class="header-right">
       <span class="header-meta">Updated: {{LAST_UPDATED}}</span>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">☀</button>
       <span class="status-indicator" id="system-status">{{SYSTEM_STATUS_LABEL}}</span>
     </div>
   </header>
 
-  <main class="main">
+  <div class="shell">
 
-    <!-- Stat cards -->
-    <section>
-      <div class="section-head">
-        <h2>Overview</h2>
-        <span>{{STATS_PERIOD_LABEL}}</span>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">{{STAT_1_LABEL}}</div>
-          <strong class="stat-value">{{STAT_1_VALUE}}</strong>
-          <div class="stat-delta {{STAT_1_DELTA_CLASS}}">{{STAT_1_DELTA}}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">{{STAT_2_LABEL}}</div>
-          <strong class="stat-value">{{STAT_2_VALUE}}</strong>
-          <div class="stat-delta {{STAT_2_DELTA_CLASS}}">{{STAT_2_DELTA}}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">{{STAT_3_LABEL}}</div>
-          <strong class="stat-value">{{STAT_3_VALUE}}</strong>
-          <div class="stat-delta {{STAT_3_DELTA_CLASS}}">{{STAT_3_DELTA}}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">{{STAT_4_LABEL}}</div>
-          <strong class="stat-value">{{STAT_4_VALUE}}</strong>
-          <div class="stat-delta {{STAT_4_DELTA_CLASS}}">{{STAT_4_DELTA}}</div>
-        </div>
-      </div>
-    </section>
+    <!-- Main content column -->
+    <main class="main">
 
-    <!-- Data table -->
-    <section class="table-section">
-      <div class="table-toolbar">
-        <h2>{{TABLE_TITLE}}</h2>
-        <div class="table-filters">
-          <button class="filter-pill active">All</button>
-          <button class="filter-pill">{{TABLE_FILTER_1}}</button>
-          <button class="filter-pill">{{TABLE_FILTER_2}}</button>
-          <button class="filter-pill">{{TABLE_FILTER_3}}</button>
+      <!-- Stat cards -->
+      <section>
+        <div class="section-head">
+          <h2>Overview</h2>
+          <span>{{STATS_PERIOD_LABEL}}</span>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th class="sort-asc">{{TABLE_COL_1}}</th>
-              <th>{{TABLE_COL_2}}</th>
-              <th>{{TABLE_COL_3}}</th>
-              <th>{{TABLE_COL_4}}</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>{{ROW_1_COL_1}}</strong></td>
-              <td class="cell-mono cell-muted">{{ROW_1_COL_2}}</td>
-              <td>{{ROW_1_COL_3}}</td>
-              <td class="cell-muted">{{ROW_1_COL_4}}</td>
-              <td><span class="badge ok">Active</span></td>
-            </tr>
-            <tr>
-              <td><strong>{{ROW_2_COL_1}}</strong></td>
-              <td class="cell-mono cell-muted">{{ROW_2_COL_2}}</td>
-              <td>{{ROW_2_COL_3}}</td>
-              <td class="cell-muted">{{ROW_2_COL_4}}</td>
-              <td><span class="badge warn">Pending</span></td>
-            </tr>
-            <tr>
-              <td><strong>{{ROW_3_COL_1}}</strong></td>
-              <td class="cell-mono cell-muted">{{ROW_3_COL_2}}</td>
-              <td>{{ROW_3_COL_3}}</td>
-              <td class="cell-muted">{{ROW_3_COL_4}}</td>
-              <td><span class="badge info">Review</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="table-footer">
-        <span>Showing {{TABLE_ROW_COUNT}} of {{TABLE_TOTAL_COUNT}} results</span>
-        <div class="pagination">
-          <button class="pg-btn active">1</button>
-          <button class="pg-btn">2</button>
-          <button class="pg-btn">3</button>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">{{STAT_1_LABEL}}</div>
+            <strong class="stat-value">{{STAT_1_VALUE}}</strong>
+            <div class="stat-delta {{STAT_1_DELTA_CLASS}}">{{STAT_1_DELTA}}</div>
+            <div class="sparkline-wrap">
+              <svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
+                <polygon class="spark-area" points="0,28 0,20 16,16 33,18 50,11 66,14 83,8 100,5 100,28"/>
+                <polyline points="0,20 16,16 33,18 50,11 66,14 83,8 100,5"/>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{STAT_2_LABEL}}</div>
+            <strong class="stat-value">{{STAT_2_VALUE}}</strong>
+            <div class="stat-delta {{STAT_2_DELTA_CLASS}}">{{STAT_2_DELTA}}</div>
+            <div class="sparkline-wrap">
+              <svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
+                <polygon class="spark-area" points="0,28 0,10 16,14 33,12 50,16 66,10 83,13 100,9 100,28"/>
+                <polyline points="0,10 16,14 33,12 50,16 66,10 83,13 100,9"/>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{STAT_3_LABEL}}</div>
+            <strong class="stat-value">{{STAT_3_VALUE}}</strong>
+            <div class="stat-delta {{STAT_3_DELTA_CLASS}}">{{STAT_3_DELTA}}</div>
+            <div class="sparkline-wrap">
+              <svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
+                <polygon class="spark-area" points="0,28 0,22 16,19 33,21 50,17 66,20 83,15 100,12 100,28"/>
+                <polyline points="0,22 16,19 33,21 50,17 66,20 83,15 100,12"/>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{STAT_4_LABEL}}</div>
+            <strong class="stat-value">{{STAT_4_VALUE}}</strong>
+            <div class="stat-delta {{STAT_4_DELTA_CLASS}}">{{STAT_4_DELTA}}</div>
+            <div class="sparkline-wrap">
+              <svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
+                <polygon class="spark-area" points="0,28 0,18 16,22 33,15 50,19 66,12 83,10 100,6 100,28"/>
+                <polyline points="0,18 16,22 33,15 50,19 66,12 83,10 100,6"/>
+              </svg>
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-  </main>
+      <!-- Primary data table -->
+      <section class="table-section">
+        <div class="table-toolbar">
+          <h2>{{TABLE_TITLE}}</h2>
+          <div class="table-filters">
+            <button class="filter-pill active">All</button>
+            <button class="filter-pill">{{TABLE_FILTER_1}}</button>
+            <button class="filter-pill">{{TABLE_FILTER_2}}</button>
+            <button class="filter-pill">{{TABLE_FILTER_3}}</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="sort-asc">{{TABLE_COL_1}}</th>
+                <th>{{TABLE_COL_2}}</th>
+                <th>{{TABLE_COL_3}}</th>
+                <th>{{TABLE_COL_4}}</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>{{ROW_1_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_1_COL_2}}</td>
+                <td>{{ROW_1_COL_3}}</td>
+                <td class="cell-muted">{{ROW_1_COL_4}}</td>
+                <td><span class="badge ok">Active</span></td>
+              </tr>
+              <tr>
+                <td><strong>{{ROW_2_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_2_COL_2}}</td>
+                <td>{{ROW_2_COL_3}}</td>
+                <td class="cell-muted">{{ROW_2_COL_4}}</td>
+                <td><span class="badge warn">Pending</span></td>
+              </tr>
+              <tr>
+                <td><strong>{{ROW_3_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_3_COL_2}}</td>
+                <td>{{ROW_3_COL_3}}</td>
+                <td class="cell-muted">{{ROW_3_COL_4}}</td>
+                <td><span class="badge info">Review</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer">
+          <span>Showing {{TABLE_ROW_COUNT}} of {{TABLE_TOTAL_COUNT}} results</span>
+          <div class="pagination">
+            <button class="pg-btn active">1</button>
+            <button class="pg-btn">2</button>
+            <button class="pg-btn">3</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Secondary data table -->
+      <section class="table-section">
+        <div class="table-toolbar">
+          <h2>{{TABLE_2_TITLE}}</h2>
+          <div class="table-filters">
+            <button class="filter-pill active">All</button>
+            <button class="filter-pill">{{TABLE_2_FILTER_1}}</button>
+            <button class="filter-pill">{{TABLE_2_FILTER_2}}</button>
+            <button class="filter-pill">{{TABLE_2_FILTER_3}}</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="sort-asc">{{TABLE_2_COL_1}}</th>
+                <th>{{TABLE_2_COL_2}}</th>
+                <th>{{TABLE_2_COL_3}}</th>
+                <th>{{TABLE_2_COL_4}}</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>{{ROW_4_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_4_COL_2}}</td>
+                <td>{{ROW_4_COL_3}}</td>
+                <td class="cell-muted">{{ROW_4_COL_4}}</td>
+                <td><span class="badge ok">Active</span></td>
+              </tr>
+              <tr>
+                <td><strong>{{ROW_5_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_5_COL_2}}</td>
+                <td>{{ROW_5_COL_3}}</td>
+                <td class="cell-muted">{{ROW_5_COL_4}}</td>
+                <td><span class="badge critical">Inactive</span></td>
+              </tr>
+              <tr>
+                <td><strong>{{ROW_6_COL_1}}</strong></td>
+                <td class="cell-mono cell-muted">{{ROW_6_COL_2}}</td>
+                <td>{{ROW_6_COL_3}}</td>
+                <td class="cell-muted">{{ROW_6_COL_4}}</td>
+                <td><span class="badge warn">Pending</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer">
+          <span>Showing {{TABLE_2_ROW_COUNT}} of {{TABLE_2_TOTAL_COUNT}} results</span>
+          <div class="pagination">
+            <button class="pg-btn active">1</button>
+            <button class="pg-btn">2</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Activity feed column -->
+    <aside class="feed">
+      <div class="feed-header">
+        <h2>{{ACTIVITY_TITLE}}</h2>
+      </div>
+      <div class="feed-list">
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_1_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_1_TEXT}} <span class="feed-badge ok">ok</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_2_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_2_TEXT}} <span class="feed-badge info">info</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_3_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_3_TEXT}} <span class="feed-badge warn">warn</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_4_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_4_TEXT}} <span class="feed-badge ok">ok</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_5_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_5_TEXT}} <span class="feed-badge info">info</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_6_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_6_TEXT}} <span class="feed-badge err">err</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_7_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_7_TEXT}} <span class="feed-badge ok">ok</span></div>
+        </div>
+        <div class="feed-item">
+          <div class="feed-time">{{ACTIVITY_8_TIME}}</div>
+          <div class="feed-text">{{ACTIVITY_8_TEXT}} <span class="feed-badge info">info</span></div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
 
   <footer>
     <span>&copy; {{COPYRIGHT_YEAR}} {{COPYRIGHT_OWNER}}</span>
     <span>{{FOOTER_VERSION_LABEL}}</span>
     <span>{{FOOTER_SUPPORT_LABEL}}</span>
   </footer>
+
+  <script>
+    const toggle = document.getElementById('theme-toggle');
+    const html = document.documentElement;
+    const update = () => {
+      const dark = html.dataset.theme === 'dark';
+      toggle.textContent = dark ? '☀' : '☾';
+    };
+    update();
+    toggle.addEventListener('click', () => {
+      html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+      update();
+    });
+
+    document.querySelectorAll('.filter-pill').forEach(pill => {
+      pill.addEventListener('click', function() {
+        this.closest('.table-filters').querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    document.querySelectorAll('thead th').forEach(th => {
+      th.addEventListener('click', function() {
+        const table = this.closest('table');
+        const idx = Array.from(this.parentElement.children).indexOf(this);
+        table.querySelectorAll('thead th').forEach((t, i) => {
+          if (i !== idx) { t.classList.remove('sort-asc', 'sort-desc'); }
+        });
+        if (this.classList.contains('sort-asc')) {
+          this.classList.replace('sort-asc', 'sort-desc');
+        } else {
+          this.classList.remove('sort-desc');
+          this.classList.add('sort-asc');
+        }
+      });
+    });
+  </script>
 
 </body>
 </html>

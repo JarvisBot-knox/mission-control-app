@@ -16,7 +16,7 @@ Static HTML templates used by the App Factory to generate client-facing sites an
 
 **Purpose:** Internal-facing operator or admin dashboard. Intended for monitoring, reporting, or ops tooling delivered as a static HTML file.
 
-**Layout:** Header bar with title + live status indicator → 4 stat cards → Sortable data table with filter pills → Footer.
+**Layout:** Sticky header with status indicator + dark/light toggle → 4 stat cards with sparklines → Primary sortable data table → Secondary data table → Footer. Right-side activity feed panel visible at ≥1100px.
 
 ---
 
@@ -35,6 +35,8 @@ All placeholders use the `{{VAR_NAME}}` syntax. Replace before delivery.
 | `{{COPYRIGHT_OWNER}}` | Entity name for copyright, e.g. `Pitch Laboratories LLC` |
 
 ### `premium_static_app` only
+
+Both templates include a dark/light mode toggle in the nav — no placeholder needed, it's wired via inline JS.
 
 | Placeholder | Description |
 |---|---|
@@ -70,6 +72,14 @@ All placeholders use the `{{VAR_NAME}}` syntax. Replace before delivery.
 | `{{TABLE_COL_1}}` through `{{TABLE_COL_4}}` | Table column headings |
 | `{{ROW_1_COL_1}}` through `{{ROW_3_COL_4}}` | Data cells for the 3 example rows |
 | `{{TABLE_ROW_COUNT}}` / `{{TABLE_TOTAL_COUNT}}` | Pagination count display |
+| `{{TABLE_2_TITLE}}` | Heading for the second data table |
+| `{{TABLE_2_FILTER_1}}` / `{{TABLE_2_FILTER_2}}` / `{{TABLE_2_FILTER_3}}` | Second table filter pill labels |
+| `{{TABLE_2_COL_1}}` through `{{TABLE_2_COL_4}}` | Second table column headings |
+| `{{ROW_4_COL_1}}` through `{{ROW_6_COL_4}}` | Data cells for rows 4–6 (second table) |
+| `{{TABLE_2_ROW_COUNT}}` / `{{TABLE_2_TOTAL_COUNT}}` | Second table pagination count display |
+| `{{ACTIVITY_TITLE}}` | Heading for the right-side activity feed panel |
+| `{{ACTIVITY_1_TIME}}` through `{{ACTIVITY_8_TIME}}` | Timestamp strings for feed items, e.g. `09:42:01` |
+| `{{ACTIVITY_1_TEXT}}` through `{{ACTIVITY_8_TEXT}}` | Event description text for each feed item |
 | `{{FOOTER_VERSION_LABEL}}` | Version string in the footer, e.g. `v1.2.0` |
 | `{{FOOTER_SUPPORT_LABEL}}` | Support contact or link text in the footer |
 
