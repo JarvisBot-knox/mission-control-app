@@ -11,7 +11,6 @@ Build Trevor's OpenClaw/Jarvis app factory so Trevor can ask OpenClaw through Te
 - GitHub repo: `https://github.com/JarvisBot-knox/mission-control-app`
 - Local repo on this machine: `/Users/knoxbot/mission-control-app-factory`
 - Production Mission Control: `https://mission-control-coral-rho.vercel.app`
-- Production Status Demo: `https://status-demo-beta.vercel.app`
 - Supabase project URL: `https://rqwcrtqnsupcpwmmaxye.supabase.co`
 
 Do not commit secrets. Basic Auth, Supabase service keys, Vercel tokens, and OpenClaw credentials live in local ignored env files and Vercel/Supabase configuration.
@@ -29,7 +28,6 @@ Do not commit secrets. Basic Auth, Supabase service keys, Vercel tokens, and Ope
 
 - Supabase schema, seed data, collection scripts, and app-factory state helpers are in the repo.
 - Mission Control app exists under `apps/mission-control`.
-- Status Demo app exists under `apps/status-demo`.
 - Mission Control routes:
   - `/`
   - `/approvals`
@@ -105,7 +103,6 @@ node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mi
 pnpm lint
 pnpm typecheck
 pnpm --filter mission-control build
-pnpm --filter status-demo build
 pnpm collect:dry-run
 ```
 
@@ -116,7 +113,6 @@ Recent validation before the UI proposal work passed:
 - `pnpm lint`
 - `pnpm typecheck`
 - `pnpm --filter mission-control build`
-- `pnpm --filter status-demo build`
 - `pnpm collect:dry-run`
 
 During the UI proposal work, the standalone HTML was the main artifact. The real app UI conversion still needs validation once implemented.

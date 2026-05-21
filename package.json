@@ -12,7 +12,6 @@
     "supabase:link": "bash scripts/supabase-link.sh",
     "supabase:push": "bash scripts/supabase-push.sh",
     "dev:mission-control": "pnpm --filter mission-control dev",
-    "dev:status-demo": "pnpm --filter status-demo dev",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck",
     "factory:clean": "node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24",
