@@ -24,6 +24,26 @@ Once daily (e.g. at 3am), expire commands pending longer than 24 hours:
 Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24
 ```
 
+## Daily Hygiene Cleanup
+Once daily (at 3am, alongside clean-stale-commands):
+```
+Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs run-hygiene
+If rows were deleted, log the summary. No Telegram notification needed unless error.
+```
+
+## Weekly Cost Summary
+Once weekly (Monday at 8am):
+```
+Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs weekly-cost-summary
+```
+
+## Weekly Health Check
+Once weekly (Sunday at 9am):
+```
+Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-healthcheck.mjs
+If degraded URLs are found, Supabase status fields are updated and Telegram is notified automatically.
+```
+
 ## Collector
 Every 30 minutes, snapshot OpenClaw state to Supabase:
 ```
