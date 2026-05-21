@@ -54,31 +54,16 @@ Mission Control production deployment was checked on 2026-05-19:
 
 ## Current UI Track
 
-Trevor does not like the current deployed Mission Control UI. The next UI direction is not the existing sci-fi cockpit and not a normal SaaS dashboard.
+Stark/Jarvis operating surface is live in `apps/mission-control/app/page.tsx`. HTML proposal and real Next app are in sync. UI conversion is complete.
 
-Current design artifact:
+Design artifact (reference only):
 
 - `apps/mission-control/ui-revamp-proposal.html`
 
-The proposal direction is a Stark/Jarvis-style operating surface:
-
-- `JARVIS >` command prompt.
-- Central arc-reactor execution core.
-- Risk-ranked reviewer inbox.
-- Evidence pack for the current decision.
-- Telegram -> OpenClaw -> Supabase -> Vercel state machine.
-- Clear distinction between approval request and actual OpenClaw execution.
-
-Claude also created a comparison artifact outside the repo:
-
-- `/Users/knoxbot/Desktop/jarvis-mission-control-v2.html`
-
-If continuing from GitHub on another machine, use the repo proposal first, then optionally compare against the Desktop artifact if it was copied separately.
-
 ## Important Pending Work
 
-1. Decide final Mission Control UI direction from the HTML proposal.
-2. Convert the chosen HTML concept into the real Next app under `apps/mission-control/app`.
+1. ~~Decide final Mission Control UI direction.~~ Done — Stark/Jarvis.
+2. ~~Convert HTML concept into the real Next app.~~ Done — `apps/mission-control/app/page.tsx`.
 3. Keep the operator workflow real:
    - what needs Trevor
    - why it matters
@@ -106,16 +91,15 @@ pnpm --filter mission-control build
 pnpm collect:dry-run
 ```
 
-Recent validation before the UI proposal work passed:
+Note: `pnpm collect:dry-run` requires `/Users/knoxbot/.openclaw/workspace/SOUL.md` — Mac Mini only. All other commands pass on any machine.
 
-- `pnpm app-factory:test`
-- `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts`
-- `pnpm lint`
-- `pnpm typecheck`
-- `pnpm --filter mission-control build`
-- `pnpm collect:dry-run`
+Last full validation: 2026-05-21
 
-During the UI proposal work, the standalone HTML was the main artifact. The real app UI conversion still needs validation once implemented.
+- `pnpm app-factory:test` — 5/5 pass
+- `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts` — 6/6 pass
+- `pnpm lint` — clean
+- `pnpm typecheck` — clean
+- `pnpm --filter mission-control build` — success (all routes compile)
 
 ## Key Files
 
