@@ -84,7 +84,7 @@ export default async function Dashboard() {
           <Link href="/approvals" className="rail-btn">APR</Link>
           <Link href="/learnings" className="rail-btn">LRN</Link>
           {build && <Link href={`/jobs/${build.id}`} className="rail-btn">JOB</Link>}
-          <Link href="/apps/placeholder" className="rail-btn">APP</Link>
+          {dashboard.apps[0] && <Link href={`/apps/${dashboard.apps[0].id}`} className="rail-btn">APP</Link>}
         </nav>
         <div className="rail-foot">
           <span className={`online-dot ${dashboard.health.gatewayStatus === 'nominal' ? 'green' : 'amber'}`} aria-label="Gateway status" />
@@ -215,7 +215,7 @@ export default async function Dashboard() {
             <div className="metric-card">
               <span className="label-mono">Gateway</span>
               <strong className="metric-num metric-status">{dashboard.health.gatewayStatus}</strong>
-              <small>{dashboard.health.model || 'model pending'}</small>
+              <small>{dashboard.health.model || 'model pending'}{dashboard.health.gatewayVersion ? ` / v${dashboard.health.gatewayVersion}` : ''}</small>
             </div>
             <div className="metric-card">
               <span className="label-mono">Apps</span>
@@ -333,7 +333,7 @@ export default async function Dashboard() {
           </article>
         </section>
 
-        {/* Bottom strip: recent builds + cron + resources */}
+        {/* Bottom strip: recent builds + apps + cron + resources + watched files + token burn */}
         <section className="jarvis-strip" aria-label="Factory data">
           <article className="strip-card wide-card">
             <div className="strip-head">
@@ -383,6 +383,79 @@ export default async function Dashboard() {
                 </div>
               ))}
               {!dashboard.resources.length && <div className="empty-line">No resources tracked.</div>}
+            </div>
+          </article>
+
+          {/* Apps registry */}
+          <article className="strip-card">
+            <div className="strip-head">
+              <span className="label-mono">Registry</span>
+              <h2>Apps</h2>
+            </div>
+            <div className="data-list compact">
+              {dashboard.apps.slice(0, 6).map((app) => (
+                <Link className="data-row" href={`/apps/${app.id}`} key={app.id}>
+                  <div>
+                    <strong>{app.name}</strong>
+                    <span>{app.app_type} / {app.visibility}</span>
+                    {app.production_url && <span className="strip-url">{app.production_url}</span>}
+                  </div>
+                  <span className={`status-pill ${statusTone(app.status)}`}>{app.status}</span>
+                </Link>
+              ))}
+              {!dashboard.apps.length && <div className="empty-line">No apps in registry.</div>}
+            </div>
+          </article>
+
+          {/* Watched files */}
+          {dashboard.watchedFiles.length > 0 && (
+            <article className="strip-card">
+              <div className="strip-head">
+                <span className="label-mono">Monitors</span>
+                <h2>Watched Files</h2>
+              </div>
+              <div className="data-list compact">
+                {dashboard.watchedFiles.slice(0, 6).map((wf) => (
+                  <div className="data-row" key={wf.id}>
+                    <div>
+                      <strong>{wf.label}</strong>
+                      <span title={wf.path}>{wf.path.length > 38 ? `…${wf.path.slice(-36)}` : wf.path}</span>
+                      {wf.latestSnapshot && (
+                        <span>{formatNumber(wf.latestSnapshot.byteSize)}B / {formatDateTime(wf.latestSnapshot.modifiedAt)}</span>
+                      )}
+                    </div>
+                    <span className={`status-dot ${wf.latestSnapshot ? 'ok' : 'warning'}`} />
+                  </div>
+                ))}
+              </div>
+            </article>
+          )}
+
+          {/* Token burn breakdown */}
+          <article className="strip-card">
+            <div className="strip-head">
+              <span className="label-mono">Token Burn</span>
+              <h2>Usage</h2>
+            </div>
+            <div className="data-list compact">
+              <div className="data-row">
+                <div><strong>Input</strong><span>tokens sent to model</span></div>
+                <span className="metric-num metric-sm">{formatNumber(dashboard.metrics.inputTokens)}</span>
+              </div>
+              <div className="data-row">
+                <div><strong>Output</strong><span>tokens generated</span></div>
+                <span className="metric-num metric-sm">{formatNumber(dashboard.metrics.outputTokens)}</span>
+              </div>
+              <div className="data-row">
+                <div><strong>Cache read</strong><span>tokens from cache</span></div>
+                <span className="metric-num metric-sm">{formatNumber(dashboard.metrics.cacheReadTokens)}</span>
+              </div>
+              <div className="data-row">
+                <div><strong>Total</strong><span>
+                  {dashboard.metrics.estimatedCost != null ? `~$${dashboard.metrics.estimatedCost.toFixed(2)}` : `${dashboard.metrics.usageRows} rows`}
+                </span></div>
+                <span className="metric-num metric-sm">{formatNumber(dashboard.metrics.totalTokens)}</span>
+              </div>
             </div>
           </article>
         </section>

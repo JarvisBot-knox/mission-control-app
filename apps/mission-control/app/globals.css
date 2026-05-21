@@ -903,6 +903,10 @@ h3 {
   position: relative;
 }
 
+.jarvis-shell:not(:has(.jarvis-drawer)) {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
 .jarvis-rail {
   align-items: center;
   backdrop-filter: blur(30px);
@@ -1646,6 +1650,15 @@ h3 {
 
 .strip-card.wide-card {
   grid-column: span 8;
+}
+
+.strip-url {
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ─── Right drawer ─── */

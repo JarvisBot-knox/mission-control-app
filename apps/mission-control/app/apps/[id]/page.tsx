@@ -13,7 +13,18 @@ export default async function AppDetailPage({ params }: { params: Promise<{ id: 
   if (!app) notFound();
 
   return (
-    <main className="detail-shell">
+    <div className="jarvis-shell">
+      <aside className="jarvis-rail" aria-label="Navigation rail">
+        <div className="reactor-mark" aria-hidden="true"><span className="mark-core" /></div>
+        <nav className="rail-nav" aria-label="Primary navigation">
+          <Link href="/" className="rail-btn">HQ</Link>
+          <Link href="/approvals" className="rail-btn">APR</Link>
+          <Link href="/learnings" className="rail-btn">LRN</Link>
+          <Link href={`/apps/${app.id}`} className="rail-btn active">APP</Link>
+        </nav>
+        <div className="rail-foot"><span className="online-dot green" /></div>
+      </aside>
+      <main className="jarvis-main">
       <div className="detail-nav"><Link href="/">Mission Control</Link><Link href="/approvals">Approvals</Link><Link href="/learnings">Learnings</Link></div>
 
       <header className="detail-hero">
@@ -68,6 +79,7 @@ export default async function AppDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </article>
       </section>
-    </main>
+      </main>
+    </div>
   );
 }
