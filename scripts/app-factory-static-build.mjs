@@ -2,9 +2,107 @@
 import { pathToFileURL } from 'node:url';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { artifactPlan, milestonePlan, resourcePlan, slugify } from './app-factory-state.mjs';
-import { visualProofPlan } from './app-factory-visual-proof.mjs';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { vercelPreviewPlan, vercelProductionPlan } from './app-factory-vercel.mjs';
+
+// ─── State helpers (inlined from deleted app-factory-state.mjs) ───────────────
+
+const RESOURCE_TYPES = new Set([
+  'github_repo',
+  'vercel_project',
+  'vercel_preview_deployment',
+  'vercel_production_deployment',
+  'auth_basic',
+  'secret_metadata',
+  'template_repo',
+]);
+const ARTIFACT_TYPES = new Set(['screenshot', 'demo_video', 'build_summary', 'check_report', 'deployment_log']);
+const SECRET_KEY_PATTERN = /(secret|password|token|api[_-]?key|service[_-]?role|credential)/i;
+
+export function slugify(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'generated-app';
+}
+
+function assertNoRawSecrets(value, path = 'payload') {
+  if (value === null || value === undefined) return;
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (SECRET_KEY_PATTERN.test(key) && child !== null && child !== undefined && String(child).trim() !== '') {
+      throw new Error(`Refusing raw secret-like field at ${childPath}`);
+    }
+    assertNoRawSecrets(child, childPath);
+  }
+}
+
+export function resourcePlan(input) {
+  if (!input.buildJobId && !input.appId) throw new Error('buildJobId or appId is required');
+  if (!RESOURCE_TYPES.has(input.resourceType)) throw new Error(`Unsupported resource type: ${input.resourceType}`);
+  assertNoRawSecrets(input.metadata || {});
+  return {
+    telegram: `Resource recorded: ${input.resourceType} / ${input.name}`,
+    resource: {
+      app_id: input.appId || null,
+      build_job_id: input.buildJobId || null,
+      resource_type: input.resourceType,
+      provider: input.provider || 'unknown',
+      name: input.name || input.resourceType,
+      external_id: input.externalId || null,
+      url: input.url || null,
+      environment: input.environment || null,
+      status: input.status || 'recorded',
+      secret_names: input.secretNames || [],
+      metadata: input.metadata || {},
+    },
+  };
+}
+
+export function artifactPlan(input) {
+  if (!input.buildJobId) throw new Error('buildJobId is required');
+  if (!ARTIFACT_TYPES.has(input.artifactType)) throw new Error(`Unsupported artifact type: ${input.artifactType}`);
+  assertNoRawSecrets(input.metadata || {});
+  return {
+    telegram: `Proof recorded: ${input.title || input.artifactType}`,
+    artifact: {
+      build_job_id: input.buildJobId,
+      deployment_id: input.deploymentId || null,
+      artifact_type: input.artifactType,
+      title: input.title || input.artifactType,
+      url: input.url || null,
+      storage_path: input.storagePath || null,
+      summary: input.summary || null,
+      metadata: input.metadata || {},
+    },
+  };
+}
+
+export function milestonePlan(input) {
+  if (!input.buildJobId) throw new Error('buildJobId is required');
+  const sequence = Number(input.sequence);
+  if (!Number.isInteger(sequence) || sequence < 1) throw new Error('sequence must be a positive integer');
+  const event = {
+    build_job_id: input.buildJobId,
+    sequence,
+    stage: input.stage || 'build',
+    status: input.status || 'completed',
+    title: input.title || 'Milestone recorded',
+    detail: input.detail || null,
+    actor_label: input.actorLabel || 'OpenClaw',
+    channel: input.channel || 'telegram',
+    metadata: input.metadata || {},
+  };
+  assertNoRawSecrets(event.metadata);
+  return {
+    telegram: `${event.title}: ${event.status}${event.detail ? `\n${event.detail}` : ''}`,
+    event,
+    jobStatus: input.jobStatus || null,
+  };
+}
 
 const execAsync = promisify(exec);
 
@@ -54,12 +152,6 @@ export function staticVerticalSlicePlan(input) {
     previewUrl: input.previewUrl,
     sourceRef: input.sourceRef || 'main',
     commitSha: input.commitSha || null,
-  });
-  const proof = visualProofPlan({
-    buildJobId: input.buildJobId,
-    previewUrl: input.previewUrl,
-    viewports: input.viewports,
-    artifactBaseUrl: input.artifactBaseUrl || null,
   });
   const production = vercelProductionPlan({
     buildJobId: input.buildJobId,
@@ -117,7 +209,6 @@ export function staticVerticalSlicePlan(input) {
       }).event },
       ...preview.resources.map((row) => ({ table: 'app_resources', row })),
       { table: 'proof_artifacts', row: preview.checkArtifact },
-      ...proof.artifacts.map((row) => ({ table: 'proof_artifacts', row })),
       { table: 'job_step_events', row: milestonePlan({
         buildJobId: input.buildJobId,
         sequence: 4,
@@ -227,7 +318,7 @@ async function runLiveBuild(flags) {
   const jobId = flags['job-id'];
   const title = flags.title || 'Untitled';
   const template = flags.template || 'premium_static_app';
-  const slug = flags.slug || slugify(title);
+  const appSlug = flags['app-slug'] || slugify(title);
   const repoName = flags.repo || `generated-${jobId}`;
   const outputDir = flags['output-dir'] || `/tmp/jarvis-build-${jobId}`;
   const vars = flags.vars && flags.vars !== true ? flags.vars : '{}';
@@ -253,20 +344,23 @@ async function runLiveBuild(flags) {
     // Step 2: GitHub
     currentStep = 'github';
     await runScript(
-      `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId}`,
+      `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId} --app-slug ${appSlug}`,
       false
     );
 
     // Step 3: Vercel preview
     currentStep = 'vercel-preview';
     await recordMilestone(jobId, 'preview', 'in_progress', 'Deploying preview', null, null, false);
-    const previewOut = await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env preview`,
+    const previewResultFile = `/tmp/jarvis-vercel-result-${jobId}-preview.json`;
+    await runScript(
+      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env preview --app-slug ${appSlug} --result-file ${previewResultFile}`,
       false
     );
     let previewUrl;
     try {
-      previewUrl = JSON.parse(previewOut.trim()).deploymentUrl;
+      const previewResultRaw = await readFile(previewResultFile, 'utf8');
+      previewUrl = JSON.parse(previewResultRaw).deploymentUrl;
+      await unlink(previewResultFile).catch(() => {});
     } catch {
       previewUrl = null;
     }
@@ -310,13 +404,16 @@ async function runLiveBuild(flags) {
     // Step 6: Vercel production
     currentStep = 'vercel-production';
     await recordMilestone(jobId, 'deploy', 'in_progress', 'Deploying to production', null, 'deploying', false);
-    const prodOut = await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env production`,
+    const prodResultFile = `/tmp/jarvis-vercel-result-${jobId}-production.json`;
+    await runScript(
+      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env production --app-slug ${appSlug} --result-file ${prodResultFile}`,
       false
     );
     let productionUrl;
     try {
-      productionUrl = JSON.parse(prodOut.trim()).deploymentUrl;
+      const prodResultRaw = await readFile(prodResultFile, 'utf8');
+      productionUrl = JSON.parse(prodResultRaw).deploymentUrl;
+      await unlink(prodResultFile).catch(() => {});
     } catch {
       productionUrl = null;
     }

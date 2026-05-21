@@ -104,11 +104,26 @@ export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = fa
 
   const defaultBranch = repo.default_branch || 'main';
 
-  const latestCommit = await githubFetch(
-    `/repos/${GITHUB_ORG}/${repoName}/git/ref/heads/${defaultBranch}`,
-    { method: 'GET' },
-    githubToken
-  );
+  let latestCommit;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      latestCommit = await githubFetch(
+        `/repos/${GITHUB_ORG}/${repoName}/git/ref/heads/${defaultBranch}`,
+        { method: 'GET' },
+        githubToken
+      );
+      break;
+    } catch (error) {
+      const is404 = error.message.includes('404');
+      const is409 = error.message.includes('409');
+      if ((is404 || is409) && attempt < 5) {
+        console.log(`[github] Retry ${attempt}/5 — waiting for auto_init ref (${error.message.slice(0, 60)})`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } else {
+        throw error;
+      }
+    }
+  }
   const latestSha = latestCommit.object.sha;
 
   const blobTree = await githubFetch(

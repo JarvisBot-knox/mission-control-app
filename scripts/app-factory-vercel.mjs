@@ -1,6 +1,105 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { artifactPlan, finalUrlPlan, resourcePlan } from './app-factory-state.mjs';
+import { writeFile } from 'node:fs/promises';
+
+// ─── State helpers (inlined from deleted app-factory-state.mjs) ───────────────
+
+const RESOURCE_TYPES = new Set([
+  'github_repo',
+  'vercel_project',
+  'vercel_preview_deployment',
+  'vercel_production_deployment',
+  'auth_basic',
+  'secret_metadata',
+  'template_repo',
+]);
+const ARTIFACT_TYPES = new Set(['screenshot', 'demo_video', 'build_summary', 'check_report', 'deployment_log']);
+const SECRET_KEY_PATTERN = /(secret|password|token|api[_-]?key|service[_-]?role|credential)/i;
+
+function assertNoRawSecrets(value, path = 'payload') {
+  if (value === null || value === undefined) return;
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (SECRET_KEY_PATTERN.test(key) && child !== null && child !== undefined && String(child).trim() !== '') {
+      throw new Error(`Refusing raw secret-like field at ${childPath}`);
+    }
+    assertNoRawSecrets(child, childPath);
+  }
+}
+
+function resourcePlan(input) {
+  if (!input.buildJobId && !input.appId) throw new Error('buildJobId or appId is required');
+  if (!RESOURCE_TYPES.has(input.resourceType)) throw new Error(`Unsupported resource type: ${input.resourceType}`);
+  assertNoRawSecrets(input.metadata || {});
+  return {
+    telegram: `Resource recorded: ${input.resourceType} / ${input.name}`,
+    resource: {
+      app_id: input.appId || null,
+      build_job_id: input.buildJobId || null,
+      resource_type: input.resourceType,
+      provider: input.provider || 'unknown',
+      name: input.name || input.resourceType,
+      external_id: input.externalId || null,
+      url: input.url || null,
+      environment: input.environment || null,
+      status: input.status || 'recorded',
+      secret_names: input.secretNames || [],
+      metadata: input.metadata || {},
+    },
+  };
+}
+
+function artifactPlan(input) {
+  if (!input.buildJobId) throw new Error('buildJobId is required');
+  if (!ARTIFACT_TYPES.has(input.artifactType)) throw new Error(`Unsupported artifact type: ${input.artifactType}`);
+  assertNoRawSecrets(input.metadata || {});
+  return {
+    telegram: `Proof recorded: ${input.title || input.artifactType}`,
+    artifact: {
+      build_job_id: input.buildJobId,
+      deployment_id: input.deploymentId || null,
+      artifact_type: input.artifactType,
+      title: input.title || input.artifactType,
+      url: input.url || null,
+      storage_path: input.storagePath || null,
+      summary: input.summary || null,
+      metadata: input.metadata || {},
+    },
+  };
+}
+
+function finalUrlPlan(input) {
+  if (!input.buildJobId) throw new Error('buildJobId is required');
+  if (!input.url) throw new Error('final URL is required');
+  const sequence = Number(input.sequence);
+  if (!Number.isInteger(sequence) || sequence < 1) throw new Error('sequence must be a positive integer');
+  return {
+    telegram: `Live URL: ${input.url}`,
+    jobPatch: { status: 'live' },
+    resource: resourcePlan({
+      buildJobId: input.buildJobId,
+      appId: input.appId || null,
+      resourceType: 'vercel_production_deployment',
+      provider: 'vercel',
+      name: input.name || 'Production deployment',
+      url: input.url,
+      environment: 'production',
+      status: 'live',
+    }).resource,
+    event: {
+      build_job_id: input.buildJobId,
+      sequence,
+      stage: 'deploy',
+      status: 'live',
+      title: 'Production URL recorded',
+      detail: input.url,
+      actor_label: 'OpenClaw',
+      channel: 'telegram',
+      metadata: { url: input.url },
+    },
+  };
+}
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLLS = 18; // 3 minutes
@@ -73,7 +172,7 @@ async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun = false }) {
+export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun = false, resultFile = null }) {
   if (!repoName) throw new Error('--repo-name is required');
 
   const vercelToken = process.env.VERCEL_TOKEN;
@@ -161,17 +260,24 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
 
   console.log(`[vercel] Deployment READY: ${deploymentUrl}`);
 
+  if (resultFile) {
+    await writeFile(resultFile, JSON.stringify({ deploymentUrl, deploymentId }), 'utf8');
+    console.log(`[vercel] Result written to ${resultFile}`);
+  }
+
   if (jobId && supabaseUrl && serviceRoleKey && deploymentUrl) {
-    const artifactType = env === 'production' ? 'vercel_production_url' : 'vercel_preview_url';
+    const summary = env === 'production'
+      ? `Vercel production deployment: ${deploymentUrl}`
+      : `Vercel preview deployment: ${deploymentUrl}`;
     await supabaseFetch(supabaseUrl, serviceRoleKey, 'proof_artifacts', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify({
         build_job_id: jobId,
-        artifact_type: artifactType,
+        artifact_type: 'deployment_log',
         title: `Vercel ${env} deployment`,
         url: deploymentUrl,
-        summary: `Deployed ${repoName} to ${env}: ${deploymentUrl}`,
+        summary,
         metadata: { deploymentId, projectName, env },
       }),
     });
@@ -286,6 +392,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     jobId: flags['job-id'],
     env: flags.env || 'preview',
     dryRun: boolFlag(flags, 'dry-run'),
+    resultFile: flags['result-file'] || null,
   })
     .then((result) => console.log(JSON.stringify(result, null, 2)))
     .catch((error) => {

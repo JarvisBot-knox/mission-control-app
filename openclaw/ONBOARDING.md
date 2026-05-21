@@ -6,6 +6,15 @@ This document tells OpenClaw everything it needs to know about the mission-contr
 
 Trevor messages Telegram with a site build request. OpenClaw creates a job, gets approval, generates the site from a template, pushes it to a private GitHub repo under JarvisBot-knox, deploys it to Vercel, and returns the live URL. Mission Control dashboard shows the full trail.
 
+## Prerequisites (One-Time Setup)
+
+Before the pipeline can run, verify these are configured in the Vercel dashboard:
+
+1. **Vercel GitHub Integration** — Go to Vercel dashboard → Settings → Git → connect JarvisBot-knox GitHub account. Without this, project creation via API returns 403.
+2. **GITHUB_TOKEN** — Personal access token for JarvisBot-knox with `repo` scope. Set in `.env.supabase`.
+3. **VERCEL_TOKEN** — API token from Vercel dashboard → Settings → Tokens. Set in `.env.supabase`.
+4. **Supabase migration applied** — Run `pnpm supabase:push` to apply all migrations including hygiene.
+
 ## Repo Location
 
 Local: `/Users/knoxbot/mission-control-app-factory`
