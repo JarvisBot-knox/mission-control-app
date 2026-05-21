@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control // Stark Console Concept</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --void: #010409;
+      --ink: #effbff;
+      --muted: #7ea4b8;
+      --dim: #496b7d;
+      --cyan: #62f2ff;
+      --cyan-2: #a6fbff;
+      --blue: #4b9bff;
+      --violet: #9878ff;
+      --green: #75ffb4;
+      --amber: #ffd166;
+      --red: #ff5f84;
+      --glass: rgba(5, 16, 29, 0.62);
+      --glass-strong: rgba(7, 24, 41, 0.82);
+      --line: rgba(127, 232, 255, 0.18);
+      --line-hot: rgba(98, 242, 255, 0.62);
+      --shadow: 0 30px 90px rgba(0, 0, 0, 0.52);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background:
+        radial-gradient(ellipse 56% 42% at 50% -4%, rgba(98, 242, 255, 0.18), transparent 100%),
+        radial-gradient(ellipse 40% 36% at 88% 6%, rgba(152, 120, 255, 0.16), transparent 100%),
+        radial-gradient(ellipse 36% 42% at 7% 92%, rgba(75, 155, 255, 0.14), transparent 100%),
+        linear-gradient(145deg, #010409, #071321 48%, #010409);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      background-image:
+        repeating-linear-gradient(60deg, transparent 0 48px, rgba(98, 242, 255, 0.035) 49px 50px),
+        repeating-linear-gradient(-60deg, transparent 0 48px, rgba(98, 242, 255, 0.028) 49px 50px),
+        repeating-linear-gradient(0deg, transparent 0 48px, rgba(98, 242, 255, 0.018) 49px 50px);
+      content: "";
+      inset: 0;
+      mask-image: radial-gradient(ellipse 95% 78% at 50% 22%, black, transparent 100%);
+      pointer-events: none;
+      position: fixed;
+      z-index: -3;
+    }
+
+    body::after {
+      animation: diagnostic-sweep 8s linear infinite;
+      background: linear-gradient(180deg, transparent, rgba(98, 242, 255, 0.12), transparent);
+      content: "";
+      height: 30vh;
+      left: 0;
+      pointer-events: none;
+      position: fixed;
+      right: 0;
+      top: -32vh;
+      z-index: -2;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    button, input { font: inherit; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr) 392px;
+      min-height: 100vh;
+      position: relative;
+      z-index: 1;
+    }
+
+    .rail {
+      align-items: center;
+      backdrop-filter: blur(30px);
+      background: rgba(1, 6, 12, 0.78);
+      border-right: 1px solid var(--line);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+      padding: 14px 10px;
+      position: sticky;
+      top: 0;
+    }
+
+    .reactor-mark {
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      position: relative;
+      width: 48px;
+    }
+
+    .reactor-mark::before,
+    .reactor-mark::after {
+      border-radius: 50%;
+      content: "";
+      position: absolute;
+    }
+
+    .reactor-mark::before {
+      animation: spin 5s linear infinite;
+      background: conic-gradient(var(--cyan) 0 54deg, transparent 54deg 154deg, rgba(98, 242, 255, 0.52) 154deg 220deg, transparent 220deg 360deg);
+      inset: 0;
+      mask: radial-gradient(circle, transparent 0 40%, black 41% 48%, transparent 49%);
+    }
+
+    .reactor-mark::after {
+      animation: spin-rev 7s linear infinite;
+      background: conic-gradient(var(--blue) 0 76deg, transparent 76deg 360deg);
+      inset: 5px;
+      mask: radial-gradient(circle, transparent 0 38%, black 39% 47%, transparent 48%);
+    }
+
+    .mark-core {
+      background: radial-gradient(circle, white 0 12%, var(--cyan) 13% 42%, rgba(98, 242, 255, 0.24) 70%, transparent);
+      border-radius: 50%;
+      box-shadow: 0 0 18px white, 0 0 44px var(--cyan);
+      height: 14px;
+      position: relative;
+      width: 14px;
+      z-index: 2;
+    }
+
+    .nav {
+      display: grid;
+      gap: 9px;
+      justify-items: center;
+    }
+
+    .nav button,
+    .rail-foot button {
+      background: rgba(8, 22, 38, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      height: 44px;
+      letter-spacing: 0.08em;
+      width: 44px;
+    }
+
+    .nav button.active {
+      background: rgba(98, 242, 255, 0.1);
+      border-color: var(--line-hot);
+      box-shadow: 0 0 18px rgba(98, 242, 255, 0.2), inset 0 0 12px rgba(98, 242, 255, 0.04);
+      color: var(--cyan);
+    }
+
+    .rail-foot {
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+    }
+
+    .online {
+      background: var(--green);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--green);
+      height: 7px;
+      width: 7px;
+    }
+
+    .main {
+      display: grid;
+      gap: 16px;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      padding: 20px 22px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 760px);
+    }
+
+    .eyebrow,
+    .label {
+      color: var(--cyan);
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+    }
+
+    .eyebrow::before {
+      background: var(--cyan);
+      content: "";
+      height: 1px;
+      width: 22px;
+    }
+
+    h1 {
+      background: linear-gradient(135deg, white 0%, #ccf7ff 44%, var(--cyan) 100%);
+      background-clip: text;
+      color: transparent;
+      font-size: clamp(34px, 4.8vw, 76px);
+      font-weight: 920;
+      line-height: 0.92;
+      margin-top: 10px;
+      max-width: 980px;
+      text-wrap: balance;
+    }
+
+    .intro {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      margin-top: 12px;
+      max-width: 760px;
+    }
+
+    .command-panel {
+      align-self: end;
+      backdrop-filter: blur(26px);
+      background: rgba(3, 11, 22, 0.84);
+      border: 1px solid rgba(98, 242, 255, 0.34);
+      box-shadow: 0 0 40px rgba(98, 242, 255, 0.08), inset 0 0 20px rgba(98, 242, 255, 0.025);
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      min-width: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .command-panel::before {
+      animation: sweep-x 4s ease-in-out infinite;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      content: "";
+      height: 1px;
+      left: 0;
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+
+    .prefix {
+      align-items: center;
+      border-right: 1px solid rgba(98, 242, 255, 0.18);
+      color: var(--cyan);
+      display: flex;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 14px;
+      white-space: nowrap;
+    }
+
+    .command-panel input {
+      background: transparent;
+      border: 0;
+      color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      min-width: 0;
+      outline: 0;
+      padding: 14px 16px;
+    }
+
+    .primary {
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      border: 0;
+      color: #02101a;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 950;
+      letter-spacing: 0.12em;
+      padding: 0 18px;
+      text-transform: uppercase;
+    }
+
+    .stage {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 300px minmax(420px, 1fr) 254px;
+      min-height: 490px;
+    }
+
+    .glass {
+      backdrop-filter: blur(28px);
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01) 58%),
+        var(--glass);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .glass::before {
+      background: linear-gradient(90deg, transparent, var(--line-hot), transparent);
+      content: "";
+      height: 1px;
+      left: 8%;
+      position: absolute;
+      right: 8%;
+      top: 0;
+    }
+
+    .glass::after {
+      animation: local-scan 9s linear infinite;
+      background: linear-gradient(180deg, transparent, rgba(98, 242, 255, 0.03), transparent);
+      content: "";
+      height: 70%;
+      left: 0;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+      top: -82%;
+    }
+
+    .brief {
+      display: grid;
+      gap: 14px;
+      grid-template-rows: auto auto 1fr;
+      padding: 20px;
+    }
+
+    .brief h2 {
+      font-size: clamp(18px, 1.7vw, 25px);
+      line-height: 1.16;
+      text-wrap: balance;
+    }
+
+    .brief p,
+    .metric small,
+    .station p,
+    .trace-row p,
+    .inbox-card p,
+    .decision p {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.58;
+    }
+
+    .evidence {
+      align-content: start;
+      display: grid;
+      gap: 8px;
+    }
+
+    .ev {
+      background: rgba(2, 9, 18, 0.74);
+      border: 1px solid rgba(98, 242, 255, 0.1);
+      border-left: 2px solid var(--cyan);
+      border-radius: 7px;
+      padding: 10px 12px;
+    }
+
+    .ev strong {
+      color: var(--ink);
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .reactor {
+      display: grid;
+      min-height: 100%;
+      padding: 16px;
+      place-items: center;
+    }
+
+    .reactor-wrap {
+      aspect-ratio: 1;
+      display: grid;
+      max-width: 460px;
+      place-items: center;
+      position: relative;
+      width: 100%;
+    }
+
+    .ring,
+    .reactor-cross,
+    .reactor-glow {
+      border-radius: 50%;
+      position: absolute;
+    }
+
+    .r1 {
+      animation: spin 17s linear infinite;
+      background: conic-gradient(var(--cyan) 0 42deg, transparent 42deg 116deg, rgba(98, 242, 255, 0.65) 116deg 162deg, transparent 162deg 236deg, rgba(98, 242, 255, 0.82) 236deg 278deg, transparent 278deg 360deg);
+      inset: 0;
+      mask: radial-gradient(circle, transparent 0 45%, black 45.5% 47%, transparent 47.5%);
+    }
+
+    .r2 {
+      animation: spin-rev 9.5s linear infinite;
+      background: conic-gradient(var(--blue) 0 65deg, transparent 65deg 190deg, rgba(152, 120, 255, 0.78) 190deg 228deg, transparent 228deg 360deg);
+      inset: 9%;
+      mask: radial-gradient(circle, transparent 0 42%, black 42.5% 44.5%, transparent 45%);
+    }
+
+    .r3 {
+      animation: spin 6.2s linear infinite;
+      background: conic-gradient(var(--cyan) 0 85deg, transparent 85deg 205deg, rgba(98, 242, 255, 0.52) 205deg 265deg, transparent 265deg 360deg);
+      inset: 19%;
+      mask: radial-gradient(circle, transparent 0 38.5%, black 39% 41.5%, transparent 42%);
+    }
+
+    .r4 {
+      animation: spin-rev 3.8s linear infinite;
+      background: conic-gradient(var(--cyan-2) 0 105deg, transparent 105deg 360deg);
+      inset: 30%;
+      mask: radial-gradient(circle, transparent 0 35%, black 35.5% 38%, transparent 38.5%);
+    }
+
+    .r5 {
+      animation: spin 2.4s linear infinite;
+      background: conic-gradient(white 0 38deg, transparent 38deg 360deg);
+      inset: 40%;
+      mask: radial-gradient(circle, transparent 0 28%, black 29% 32%, transparent 33%);
+    }
+
+    .reactor-cross {
+      background:
+        linear-gradient(90deg, transparent 49.6%, rgba(98, 242, 255, 0.11) 50%, transparent 50.4%),
+        linear-gradient(0deg, transparent 49.6%, rgba(98, 242, 255, 0.11) 50%, transparent 50.4%);
+      inset: 14%;
+    }
+
+    .reactor-glow {
+      animation: core-pulse 3.2s ease-in-out infinite;
+      background: radial-gradient(circle, white 0 8%, var(--cyan) 9% 34%, rgba(98, 242, 255, 0.34) 62%, transparent 78%);
+      box-shadow: 0 0 20px white, 0 0 54px var(--cyan), 0 0 118px rgba(98, 242, 255, 0.45);
+      height: 24%;
+      width: 24%;
+      z-index: 10;
+    }
+
+    .node {
+      backdrop-filter: blur(18px);
+      background: rgba(1, 7, 16, 0.84);
+      border: 1px solid rgba(98, 242, 255, 0.38);
+      border-radius: 14px;
+      box-shadow: 0 0 50px rgba(98, 242, 255, 0.1), inset 0 0 18px rgba(98, 242, 255, 0.02);
+      max-width: 260px;
+      padding: 18px 22px;
+      position: absolute;
+      text-align: center;
+      z-index: 20;
+    }
+
+    .node h2 {
+      font-size: clamp(22px, 2.6vw, 34px);
+      line-height: 1.02;
+      margin: 8px 0 6px;
+      text-transform: uppercase;
+    }
+
+    .status {
+      align-items: center;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      display: inline-flex;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      font-weight: 900;
+      gap: 6px;
+      justify-self: start;
+      letter-spacing: 0.1em;
+      padding: 6px 8px;
+      text-transform: uppercase;
+    }
+
+    .status::before {
+      background: currentColor;
+      border-radius: 50%;
+      box-shadow: 0 0 10px currentColor;
+      content: "";
+      height: 6px;
+      width: 6px;
+    }
+
+    .ok { background: rgba(117, 255, 180, 0.12); color: var(--green); }
+    .warn { background: rgba(255, 209, 102, 0.13); color: var(--amber); }
+    .info { background: rgba(98, 242, 255, 0.12); color: var(--cyan); }
+    .hot { background: rgba(152, 120, 255, 0.14); color: var(--violet); }
+    .danger { background: rgba(255, 95, 132, 0.13); color: var(--red); }
+
+    .metrics {
+      display: grid;
+      gap: 9px;
+      grid-template-rows: repeat(4, 1fr);
+      padding: 12px;
+    }
+
+    .metric {
+      background: rgba(2, 9, 18, 0.72);
+      border: 1px solid rgba(98, 242, 255, 0.1);
+      border-left: 2px solid rgba(98, 242, 255, 0.42);
+      border-radius: 8px;
+      padding: 10px 13px;
+    }
+
+    .metric strong {
+      color: var(--cyan);
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 27px;
+      font-weight: 500;
+      line-height: 1.1;
+      margin: 3px 0 2px;
+    }
+
+    .workflow {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1fr) 350px;
+    }
+
+    .panel-head {
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      padding: 15px 18px;
+    }
+
+    .panel-head h2 {
+      font-size: 18px;
+      margin-top: 3px;
+    }
+
+    .panel-body {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .stations {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .station {
+      background: rgba(2, 9, 18, 0.66);
+      border: 1px solid rgba(98, 242, 255, 0.1);
+      border-radius: 9px;
+      min-height: 128px;
+      padding: 11px;
+    }
+
+    .station h3 {
+      font-size: 13px;
+      margin: 10px 0 6px;
+    }
+
+    .station.now {
+      border-color: rgba(255, 209, 102, 0.58);
+      box-shadow: 0 0 30px rgba(255, 209, 102, 0.08), inset 0 0 14px rgba(255, 209, 102, 0.025);
+    }
+
+    .decision {
+      align-items: center;
+      background: linear-gradient(135deg, rgba(255, 209, 102, 0.1), rgba(2, 9, 18, 0.72) 54%);
+      border: 1px solid rgba(255, 209, 102, 0.34);
+      border-radius: 10px;
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) 225px;
+      padding: 14px;
+    }
+
+    .decision h3 {
+      font-size: 20px;
+      margin: 5px 0 7px;
+    }
+
+    .actions {
+      display: grid;
+      gap: 8px;
+    }
+
+    .btn {
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      padding: 11px 12px;
+      text-transform: uppercase;
+    }
+
+    .btn.primary {
+      border-radius: 6px;
+      padding: 11px 12px;
+    }
+
+    .btn.ghost {
+      background: rgba(8, 22, 38, 0.72);
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+
+    .trace {
+      display: grid;
+      gap: 9px;
+    }
+
+    .trace-row {
+      background: rgba(2, 9, 18, 0.66);
+      border: 1px solid rgba(98, 242, 255, 0.1);
+      border-radius: 8px;
+      display: grid;
+      gap: 9px;
+      grid-template-columns: 70px minmax(0, 1fr);
+      padding: 10px 11px;
+    }
+
+    .trace-row code {
+      color: var(--cyan);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .drawer {
+      backdrop-filter: blur(30px);
+      background: rgba(1, 6, 12, 0.78);
+      border-left: 1px solid var(--line);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+      position: sticky;
+      top: 0;
+    }
+
+    .drawer-head,
+    .drawer-foot {
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      gap: 10px;
+      padding: 20px;
+    }
+
+    .drawer-head h2 {
+      font-size: 30px;
+      line-height: 1;
+    }
+
+    .drawer-head p {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .inbox {
+      display: grid;
+      gap: 11px;
+      overflow: auto;
+      padding: 16px;
+    }
+
+    .inbox-card {
+      background: rgba(5, 16, 29, 0.72);
+      border: 1px solid rgba(98, 242, 255, 0.12);
+      border-radius: 10px;
+      display: grid;
+      gap: 10px;
+      padding: 13px;
+    }
+
+    .inbox-card.priority {
+      border-color: rgba(255, 209, 102, 0.46);
+    }
+
+    .inbox-card h3 {
+      font-size: 18px;
+    }
+
+    .pairs {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .pairs div {
+      background: rgba(2, 9, 18, 0.58);
+      border: 1px solid rgba(98, 242, 255, 0.1);
+      border-radius: 7px;
+      padding: 9px;
+    }
+
+    .pairs strong {
+      display: block;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .drawer-foot {
+      border-bottom: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes spin-rev { to { transform: rotate(-360deg); } }
+    @keyframes diagnostic-sweep { to { transform: translateY(136vh); } }
+    @keyframes sweep-x {
+      0%, 100% { transform: translateX(-100%); opacity: 0; }
+      25%, 70% { opacity: 1; }
+      100% { transform: translateX(100%); }
+    }
+    @keyframes local-scan { to { transform: translateY(260%); } }
+    @keyframes core-pulse {
+      0%, 100% { transform: scale(0.96); opacity: 0.92; }
+      50% { transform: scale(1.04); opacity: 1; }
+    }
+
+    @media (max-width: 1320px) {
+      .shell { grid-template-columns: 72px minmax(0, 1fr); }
+      .drawer {
+        grid-column: 2;
+        min-height: auto;
+        position: static;
+      }
+      .stage,
+      .workflow,
+      .hero { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto; }
+    }
+
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail {
+        border-bottom: 1px solid var(--line);
+        border-right: 0;
+        grid-template-columns: auto 1fr auto;
+        grid-template-rows: auto;
+        min-height: auto;
+        position: static;
+      }
+      .nav { display: flex; }
+      .main { padding: 16px; }
+      .command-panel,
+      .stations,
+      .decision,
+      .metrics,
+      .pairs,
+      .trace-row { grid-template-columns: 1fr; }
+      .command-panel .primary { min-height: 42px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="reactor-mark"><span class="mark-core"></span></div>
+      <nav class="nav" aria-label="Primary navigation">
+        <button class="active">HQ</button>
+        <button>AGT</button>
+        <button>CMD</button>
+        <button>LOG</button>
+        <button>SYS</button>
+      </nav>
+      <div class="rail-foot">
+        <span class="online" aria-label="Online"></span>
+        <button>ARM</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div>
+          <div class="eyebrow">Jarvis mission interface / OpenClaw App Factory</div>
+          <h1>Command the agent. Verify the outcome. Ship the site.</h1>
+          <p class="intro">This is the control room Tony would build: one live decision, one ranked inbox, one evidence pack, and a reactor-level view of Telegram to production.</p>
+        </div>
+        <div class="command-panel">
+          <div class="prefix">JARVIS &gt;</div>
+          <input value="Create a preview, attach proof, and wait for deploy approval" aria-label="Command">
+          <button class="primary">Transmit</button>
+        </div>
+      </header>
+
+      <section class="stage">
+        <article class="glass brief">
+          <div>
+            <span class="label">Jarvis assessment</span>
+            <h2>Proceed with caution. The command queue is not clean enough to trust.</h2>
+          </div>
+          <p>Resolve stale retry, cancel, and duplicate approval commands before running the processor. Approval only matters when execution state is deterministic.</p>
+          <div class="evidence">
+            <div class="ev"><span class="label">Recommended action</span><strong>Resolve stale queue -> approve_build</strong></div>
+            <div class="ev"><span class="label">Why it matters</span><strong>State drift makes approval meaningless</strong></div>
+            <div class="ev"><span class="label">Proof required</span><strong>Vercel preview URL / build log / artifact hash</strong></div>
+          </div>
+        </article>
+
+        <article class="glass reactor">
+          <div class="reactor-wrap">
+            <span class="ring r1"></span>
+            <span class="ring r2"></span>
+            <span class="ring r3"></span>
+            <span class="ring r4"></span>
+            <span class="ring r5"></span>
+            <span class="reactor-cross"></span>
+            <span class="reactor-glow"></span>
+            <div class="node">
+              <span class="status warn">Human gate active</span>
+              <h2>Execution<br>Paused</h2>
+              <p>OpenClaw is ready. Holding all side effects until Trevor approves with evidence attached.</p>
+            </div>
+          </div>
+        </article>
+
+        <aside class="glass metrics">
+          <div class="metric"><span class="label">Gates</span><strong data-count="1">1</strong><small>Build approval waiting</small></div>
+          <div class="metric"><span class="label">Queued</span><strong data-count="4">4</strong><small>Conflicting commands</small></div>
+          <div class="metric"><span class="label">Gateway</span><strong style="color:var(--green)">OK</strong><small>OpenClaw nominal</small></div>
+          <div class="metric"><span class="label">Deploys</span><strong data-count="2">2</strong><small>Known Vercel apps</small></div>
+        </aside>
+      </section>
+
+      <section class="workflow">
+        <article class="glass">
+          <div class="panel-head">
+            <div><span class="label">Factory state machine</span><h2>Telegram -> Production</h2></div>
+            <span class="status warn">Approval required</span>
+          </div>
+          <div class="panel-body">
+            <div class="stations">
+              <div class="station"><span class="status ok">Done</span><h3>Telegram request</h3><p>User asks for the site from chat.</p></div>
+              <div class="station"><span class="status ok">Done</span><h3>Action proposed</h3><p>OpenClaw records structured intent in Supabase.</p></div>
+              <div class="station now"><span class="status warn">Now</span><h3>Human gate</h3><p>Reviewer sees exact command, risk, evidence, and expected outcome.</p></div>
+              <div class="station"><span class="status info">Next</span><h3>Execute once</h3><p>Processor validates state and runs idempotently.</p></div>
+              <div class="station"><span class="status hot">Verify</span><h3>Proof loop</h3><p>Preview, logs, artifacts, and learning signal recorded.</p></div>
+            </div>
+
+            <div class="decision">
+              <div>
+                <span class="label">Current decision</span>
+                <h3>Mission Control App Factory Demo</h3>
+                <p>Expected: awaiting_build_approval / Risk: approval_gate / Channel: Telegram / Stack: Next.js, Supabase, Vercel.</p>
+              </div>
+              <div class="actions">
+                <button class="btn primary">Approve build</button>
+                <button class="btn ghost">Reject</button>
+                <button class="btn ghost">Evidence pack</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="glass">
+          <div class="panel-head">
+            <div><span class="label">Live trace</span><h2>Agent activity</h2></div>
+            <span class="status info">Auditable</span>
+          </div>
+          <div class="panel-body trace">
+            <div class="trace-row"><code>20:41:08</code><p>approve_build requested from Mission Control. Awaiting OpenClaw acknowledgement.</p></div>
+            <div class="trace-row"><code>20:36:44</code><p>Job entered awaiting_build_approval. Execution halted before side effects.</p></div>
+            <div class="trace-row"><code>20:30:12</code><p>OpenClaw converted Telegram request into structured build workflow.</p></div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <aside class="drawer">
+      <header class="drawer-head">
+        <span class="label">Ranked reviewer inbox</span>
+        <h2>What needs Trevor?</h2>
+        <p>Risk-ranked. Highest consequence first. Jarvis explains the move, not just the event.</p>
+      </header>
+      <section class="inbox">
+        <article class="inbox-card priority">
+          <span class="status danger">Resolve first</span>
+          <h3>Conflicting stale commands</h3>
+          <p>retry_job, cancel_job, and duplicate approve_build all target the same old job. Do not process blindly. State drift risk is high.</p>
+          <div class="pairs"><div><span class="label">Impact</span><strong>State drift</strong></div><div><span class="label">Fix</span><strong>Mark resolved</strong></div></div>
+        </article>
+        <article class="inbox-card">
+          <span class="status warn">Decision</span>
+          <h3>Build approval</h3>
+          <p>Approve only after stale command cleanup. Processor validates expected state before execution.</p>
+          <div class="pairs"><div><span class="label">Command</span><strong>approve_build</strong></div><div><span class="label">Proof</span><strong>Preview URL</strong></div></div>
+        </article>
+        <article class="inbox-card">
+          <span class="status info">Setup</span>
+          <h3>Command worker schedule</h3>
+          <p>Choose manual run, deterministic cron, or controlled OpenClaw job for command processing.</p>
+        </article>
+        <article class="inbox-card">
+          <span class="status hot">Learning</span>
+          <h3>Rejected decisions become memory</h3>
+          <p>Every override feeds the learning loop with a reason tag and outcome signal.</p>
+        </article>
+      </section>
+      <footer class="drawer-foot">
+        <span class="status ok">Supabase</span>
+        <span class="status ok">Vercel</span>
+        <span class="status info">gpt-5.5</span>
+      </footer>
+    </aside>
+  </div>
+</body>
+</html>

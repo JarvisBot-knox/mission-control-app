@@ -389,13 +389,20 @@ async function collect() {
       is_active: true,
     });
 
-    await insert('file_snapshots', {
-      watched_file_id: watchedFile.id,
-      byte_size: file.byte_size,
-      sha256: file.sha256,
-      content: file.content,
-      modified_at: file.modified_at,
-    });
+    const existingSnapshot = await supabaseFetch(
+      `file_snapshots?select=id&watched_file_id=eq.${encodeURIComponent(watchedFile.id)}&sha256=eq.${encodeURIComponent(file.sha256)}&limit=1`
+    );
+    if (existingSnapshot?.length) {
+      console.log(`skipped unchanged: ${file.label}`);
+    } else {
+      await insert('file_snapshots', {
+        watched_file_id: watchedFile.id,
+        byte_size: file.byte_size,
+        sha256: file.sha256,
+        content: file.content,
+        modified_at: file.modified_at,
+      });
+    }
   }
 
   for (const usageRow of usageRows) {

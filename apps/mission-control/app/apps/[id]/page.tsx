@@ -34,8 +34,8 @@ export default async function AppDetailPage({ params }: { params: Promise<{ id: 
           <div className="data-list">
             {detail.deployments.map((deployment) => (
               <div className="data-row" key={deployment.id}>
-                <div><strong>{deployment.environment}</strong><span>{formatDateTime(deployment.started_at)}</span></div>
-                {deployment.deployment_url ? <a href={deployment.deployment_url}>open</a> : <span className={`status-pill ${statusTone(deployment.status)}`}>{deployment.status}</span>}
+                <div><strong>{deployment.environment ?? deployment.resource_type}</strong><span>{formatDateTime(deployment.created_at)}</span></div>
+                {deployment.url ? <a href={deployment.url}>open</a> : <span className={`status-pill ${statusTone(deployment.status)}`}>{deployment.status}</span>}
               </div>
             ))}
             {!detail.deployments.length && <div className="empty-line">No deployments linked.</div>}

@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const GITHUB_API = 'https://api.github.com';
 const GITHUB_ORG = 'JarvisBot-knox';
 
 function parseArgs(argv) {
   const flags = {};
-  for (let i = 0; i < argv.length; i++) {
+  for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (!token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`);
     const key = token.slice(2);
@@ -17,17 +16,18 @@ function parseArgs(argv) {
       flags[key] = true;
     } else {
       flags[key] = next;
-      i++;
+      i += 1;
     }
   }
   return flags;
 }
 
-async function githubFetch(path, options = {}) {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN environment variable is required');
+function boolFlag(flags, name) {
+  return flags[name] === true || flags[name] === 'true';
+}
 
-  const url = path.startsWith('https://') ? path : `${GITHUB_API}${path}`;
+async function githubFetch(path, options = {}, token) {
+  const url = path.startsWith('https://') ? path : `https://api.github.com${path}`;
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -41,28 +41,20 @@ async function githubFetch(path, options = {}) {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`GitHub API ${path} failed: ${response.status} ${body}`);
+    throw new Error(`GitHub ${path} failed: ${response.status} ${body}`);
   }
 
   if (response.status === 204) return null;
   return response.json();
 }
 
-async function supabaseFetch(path, options = {}) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    console.warn('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — skipping Supabase record');
-    return null;
-  }
-
+async function supabaseFetch(supabaseUrl, serviceRoleKey, path, options = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
       'Content-Type': 'application/json',
-      Prefer: 'return=representation',
       ...(options.headers || {}),
     },
   });
@@ -77,157 +69,120 @@ async function supabaseFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-function collectFiles(dir, base = dir) {
-  const entries = readdirSync(dir);
-  const files = [];
-  for (const entry of entries) {
-    const full = join(dir, entry);
-    const rel = full.slice(base.length + 1);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      files.push(...collectFiles(full, base));
-    } else {
-      files.push({ path: rel, content: readFileSync(full) });
+export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = false }) {
+  if (!repoName) throw new Error('--repo-name is required');
+  if (!sourceDir) throw new Error('--source-dir is required');
+
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (!githubToken) throw new Error('GITHUB_TOKEN env var is required');
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const files = await readdir(sourceDir);
+
+  if (dryRun) {
+    console.log(`[dry-run] Would create private repo: ${GITHUB_ORG}/${repoName}`);
+    for (const file of files) {
+      console.log(`[dry-run] Would push file: ${file}`);
     }
+    if (jobId && supabaseUrl && serviceRoleKey) {
+      console.log(`[dry-run] Would record app_resources row for github_repo`);
+    }
+    return {
+      dryRun: true,
+      repoUrl: `https://github.com/${GITHUB_ORG}/${repoName}`,
+      cloneUrl: `https://github.com/${GITHUB_ORG}/${repoName}.git`,
+    };
   }
-  return files;
-}
 
-async function pushFilesToRepo(owner, repoName, files, defaultBranch) {
-  const repoPath = `/repos/${owner}/${repoName}`;
+  console.log(`[github] Creating private repo: ${GITHUB_ORG}/${repoName}`);
+  const repo = await githubFetch('/user/repos', {
+    method: 'POST',
+    body: JSON.stringify({ name: repoName, private: true, auto_init: true }),
+  }, githubToken);
 
-  const refData = await githubFetch(`${repoPath}/git/refs/heads/${defaultBranch}`).catch(() => null);
+  const defaultBranch = repo.default_branch || 'main';
 
-  let treeSha;
-  let parentSha;
+  const latestCommit = await githubFetch(
+    `/repos/${GITHUB_ORG}/${repoName}/git/ref/heads/${defaultBranch}`,
+    { method: 'GET' },
+    githubToken
+  );
+  const latestSha = latestCommit.object.sha;
 
-  if (refData) {
-    const commitData = await githubFetch(`${repoPath}/git/commits/${refData.object.sha}`);
-    parentSha = refData.object.sha;
-    treeSha = commitData.tree.sha;
-  }
+  const blobTree = await githubFetch(
+    `/repos/${GITHUB_ORG}/${repoName}/git/trees/${latestSha}`,
+    { method: 'GET' },
+    githubToken
+  );
 
   const treeItems = [];
   for (const file of files) {
-    const blobData = await githubFetch(`${repoPath}/git/blobs`, {
+    const content = await readFile(join(sourceDir, file), 'utf8');
+    const blob = await githubFetch(`/repos/${GITHUB_ORG}/${repoName}/git/blobs`, {
       method: 'POST',
+      body: JSON.stringify({ content, encoding: 'utf-8' }),
+    }, githubToken);
+    treeItems.push({ path: file, mode: '100644', type: 'blob', sha: blob.sha });
+    console.log(`[github] Pushed: ${file}`);
+  }
+
+  const newTree = await githubFetch(`/repos/${GITHUB_ORG}/${repoName}/git/trees`, {
+    method: 'POST',
+    body: JSON.stringify({ base_tree: blobTree.sha, tree: treeItems }),
+  }, githubToken);
+
+  const commit = await githubFetch(`/repos/${GITHUB_ORG}/${repoName}/git/commits`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message: 'Initial generated site',
+      tree: newTree.sha,
+      parents: [latestSha],
+    }),
+  }, githubToken);
+
+  await githubFetch(`/repos/${GITHUB_ORG}/${repoName}/git/refs/heads/${defaultBranch}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ sha: commit.sha }),
+  }, githubToken);
+
+  const repoUrl = repo.html_url;
+  const cloneUrl = repo.clone_url;
+
+  if (jobId && supabaseUrl && serviceRoleKey) {
+    await supabaseFetch(supabaseUrl, serviceRoleKey, 'app_resources', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
       body: JSON.stringify({
-        content: file.content.toString('base64'),
-        encoding: 'base64',
+        build_job_id: jobId,
+        resource_type: 'github_repo',
+        provider: 'github',
+        name: `${GITHUB_ORG}/${repoName}`,
+        url: repoUrl,
+        status: 'created',
+        metadata: { html_url: repoUrl, clone_url: cloneUrl },
       }),
     });
-    treeItems.push({ path: file.path, mode: '100644', type: 'blob', sha: blobData.sha });
+    console.log(`[github] Recorded app_resources row`);
   }
 
-  const newTree = await githubFetch(`${repoPath}/git/trees`, {
-    method: 'POST',
-    body: JSON.stringify({
-      base_tree: treeSha,
-      tree: treeItems,
-    }),
-  });
-
-  const newCommit = await githubFetch(`${repoPath}/git/commits`, {
-    method: 'POST',
-    body: JSON.stringify({
-      message: 'Initial build from App Factory',
-      tree: newTree.sha,
-      ...(parentSha ? { parents: [parentSha] } : { parents: [] }),
-    }),
-  });
-
-  const refEndpoint = refData
-    ? `${repoPath}/git/refs/heads/${defaultBranch}`
-    : `${repoPath}/git/refs`;
-
-  if (refData) {
-    await githubFetch(refEndpoint, {
-      method: 'PATCH',
-      body: JSON.stringify({ sha: newCommit.sha, force: false }),
-    });
-  } else {
-    await githubFetch(refEndpoint, {
-      method: 'POST',
-      body: JSON.stringify({ ref: `refs/heads/${defaultBranch}`, sha: newCommit.sha }),
-    });
-  }
-
-  return newCommit.sha;
-}
-
-async function main(argv) {
-  const flags = parseArgs(argv);
-
-  const repoName = flags['repo-name'];
-  if (!repoName) throw new Error('--repo-name is required');
-
-  const sourceDir = flags['source-dir'];
-  if (!sourceDir) throw new Error('--source-dir is required');
-
-  const jobId = flags['job-id'];
-  if (!jobId) throw new Error('--job-id is required');
-
-  const defaultBranch = 'main';
-
-  const repoData = await githubFetch(`/orgs/${GITHUB_ORG}/repos`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: repoName,
-      private: true,
-      auto_init: true,
-      description: `App Factory build — job ${jobId}`,
-    }),
-  });
-
-  console.log(`Repo created: ${repoData.html_url}`);
-
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-
-  const files = collectFiles(sourceDir);
-  console.log(`Pushing ${files.length} file(s) to ${GITHUB_ORG}/${repoName}...`);
-
-  const commitSha = await pushFilesToRepo(GITHUB_ORG, repoName, files, defaultBranch);
-
-  await supabaseFetch('app_resources', {
-    method: 'POST',
-    body: JSON.stringify({
-      build_job_id: jobId,
-      resource_type: 'github_repo',
-      provider: 'github',
-      name: `${GITHUB_ORG}/${repoName}`,
-      external_id: String(repoData.id),
-      url: repoData.html_url,
-      environment: null,
-      status: 'ready',
-      secret_names: [],
-      metadata: {
-        defaultBranch,
-        visibility: 'private',
-        commitSha,
-        repoName,
-        owner: GITHUB_ORG,
-      },
-    }),
-  });
-
-  const output = {
-    repoName,
-    repoUrl: repoData.html_url,
-    defaultBranch,
-    commitSha,
-    cloneUrl: repoData.clone_url,
-    jobId,
-  };
-
-  console.log(JSON.stringify(output, null, 2));
-  return output;
+  console.log(`[github] Repo ready: ${repoUrl}`);
+  return { repoUrl, cloneUrl, repoFullName: `${GITHUB_ORG}/${repoName}` };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-}
+  const flags = parseArgs(process.argv.slice(2));
 
-export { main as run };
+  createGithubRepo({
+    repoName: flags['repo-name'],
+    sourceDir: flags['source-dir'],
+    jobId: flags['job-id'],
+    dryRun: boolFlag(flags, 'dry-run'),
+  })
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+}
