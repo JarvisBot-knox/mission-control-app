@@ -128,7 +128,7 @@ Note: `pnpm collect:dry-run` requires `/Users/knoxbot/.openclaw/workspace/SOUL.m
 
 Last full validation: 2026-05-22
 
-- `pnpm app-factory:test` — 9/9 pass
+- `pnpm app-factory:test` — 13/13 pass
 - `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts` — 6/6 pass
 - `pnpm lint` — clean
 - `pnpm typecheck` — clean
@@ -146,6 +146,7 @@ Last full validation: 2026-05-22
 - `apps/mission-control/app/learnings/page.tsx`
 - `apps/mission-control/lib/mission-control-data.ts`
 - `apps/mission-control/app/actions.ts`
+- `scripts/app-factory-contract.mjs`
 - `scripts/app-factory-job.mjs`
 - `docs/OPENCLAW_APP_FACTORY_COMMANDS.md`
 - `docs/APP_FACTORY_WORKFLOW.md`
