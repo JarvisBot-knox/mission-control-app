@@ -369,18 +369,28 @@ async function runLiveBuild(flags) {
 
     // Step 4: Insert deploy approval request
     currentStep = 'deploy-approval-request';
-    await supabaseFetch('command_requests', {
+    await supabaseFetch('job_approvals', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify({
         build_job_id: jobId,
-        command_type: 'request_deploy_approval',
         status: 'pending',
-        target_type: 'approval',
+        approval_type: 'deploy',
+        requested_action: `Deploy ${title} to production`,
+        requested_channel: 'telegram',
         requested_by_label: 'OpenClaw',
         risk_category: 'production_deploy',
-        result_summary: `Preview: ${previewUrl || 'see job resources'}`,
+        summary: `Approve production deploy after reviewing ${previewUrl || 'the preview deployment in Mission Control'}.`,
+        metadata: {
+          previewUrl,
+          repoName,
+        },
       }),
+    });
+    await supabaseFetch(`build_jobs?id=eq.${encodeURIComponent(jobId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ status: 'awaiting_deploy_approval' }),
     });
 
     // Step 5: Poll for deploy approval

@@ -302,7 +302,7 @@ export function commandAcknowledgementPlan(input) {
   };
 }
 
-// ─── Command-loop helpers (inlined from app-factory-command-loop.mjs) ─────────
+// ─── Command-loop helpers ─────────────────────────────────────────────────────
 
 const APPROVAL_COMMANDS = new Map([
   ['approve_build', { approvalType: 'build', decision: 'approved' }],
@@ -828,17 +828,8 @@ async function processCommandRecord(command, dryRun) {
           detail: `Job reset from '${jobForRetry.status}' to 'build_approved' for retry.`,
           actor_label: 'OpenClaw',
         });
-        await insert('command_requests', {
-          build_job_id: command.build_job_id,
-          command_type: 'retry_build',
-          status: 'pending',
-          requested_by_label: 'OpenClaw',
-          target_type: 'build_job',
-          target_id: command.build_job_id,
-          result_summary: `Retry queued from command ${command.id}`,
-        });
-        console.log(`[retry] Job ${command.build_job_id} reset to build_approved. New retry_build command queued.`);
-        telegram = `Retry initiated for job ${command.build_job_id}. Job reset to build_approved and queued for next OpenClaw poll.`;
+        console.log(`[retry] Job ${command.build_job_id} reset to build_approved for the next controlled build run.`);
+        telegram = `Retry initiated for job ${command.build_job_id}. Job reset to build_approved for the next controlled build run.`;
       }
     } else if (commandKind === 'learning') {
       const plan = buildLearningCommandPlan(command);
@@ -876,42 +867,51 @@ async function processCommand(flags, dryRun) {
 async function cleanStaleCommands(flags, dryRun) {
   const hours = Number(flags['older-than-hours'] || 24);
   if (Number.isNaN(hours) || hours <= 0) throw new Error('--older-than-hours must be a positive number');
+  const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   if (dryRun) {
     if (supabaseUrl && serviceRoleKey) {
       const rows = await read(
-        `command_requests?select=id,command_type,created_at&status=eq.pending&created_at=lt.${encodeURIComponent(new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())}&order=created_at.asc`
+        `command_requests?select=id,command_type,requested_at&status=eq.pending&requested_at=lt.${encodeURIComponent(cutoffIso)}&order=requested_at.asc`
       );
       console.log(`[dry-run] Would expire ${rows.length} stale pending command(s) older than ${hours}h:`);
-      for (const row of rows) console.log(`  - ${row.id} (${row.command_type}) created ${row.created_at}`);
+      for (const row of rows) console.log(`  - ${row.id} (${row.command_type}) requested ${row.requested_at}`);
       return { dryRun: true, wouldExpire: rows.length, rows };
     }
-    const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-    console.log(`[dry-run] Would query: command_requests where status=pending AND created_at < ${cutoffIso}`);
-    console.log(`[dry-run] Would set: status=expired, decided_at=now(), decision_note='auto-expired: stale pending command'`);
-    return { dryRun: true, olderThanHours: hours, cutoff: cutoffIso };
+    console.log(`[dry-run] Would query: command_requests where status=pending AND requested_at < ${cutoffIso}`);
+    console.log(`[dry-run] Would set: status=canceled, completed_at=now(), error_message='auto-canceled: stale pending command'`);
+    return {
+      dryRun: true,
+      olderThanHours: hours,
+      cutoff: cutoffIso,
+      queryField: 'requested_at',
+      patch: {
+        status: 'canceled',
+        completed_at: '<now>',
+        error_message: 'auto-canceled: stale pending command',
+      },
+    };
   }
 
-  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const rows = await read(
-    `command_requests?select=id,command_type,created_at&status=eq.pending&created_at=lt.${encodeURIComponent(cutoff)}&order=created_at.asc`
+    `command_requests?select=id,command_type,requested_at&status=eq.pending&requested_at=lt.${encodeURIComponent(cutoffIso)}&order=requested_at.asc`
   );
 
   for (const row of rows) {
     await patchById('command_requests', row.id, {
-      status: 'expired',
-      decided_at: new Date().toISOString(),
-      decision_note: 'auto-expired: stale pending command',
+      status: 'canceled',
+      completed_at: new Date().toISOString(),
+      error_message: 'auto-canceled: stale pending command',
     });
-    console.log(`[expire] ${row.id} (${row.command_type}) created ${row.created_at}`);
+    console.log(`[cancel] ${row.id} (${row.command_type}) requested ${row.requested_at}`);
   }
 
-  console.log(`[clean-stale-commands] Expired ${rows.length} stale pending command(s) older than ${hours}h.`);
+  console.log(`[clean-stale-commands] Canceled ${rows.length} stale pending command(s) older than ${hours}h.`);
   return {
     telegram: rows.length
-      ? `Expired ${rows.length} stale pending Mission Control command(s) older than ${hours}h.`
+      ? `Canceled ${rows.length} stale pending Mission Control command(s) older than ${hours}h.`
       : `No stale pending Mission Control commands found (threshold: ${hours}h).`,
-    expired: rows.length,
+    canceled: rows.length,
   };
 }
 

@@ -215,6 +215,24 @@ node scripts/app-factory-job.mjs process-commands --limit 10
 
 This is the command OpenClaw should run from a controlled worker/cron loop after Mission Control creates requests. It is allowlisted and structured; it is not a shell bridge.
 
+### clean-stale-commands
+
+Cancels pending Mission Control command requests older than the configured threshold. It uses the `command_requests.requested_at`, `status`, `completed_at`, and `error_message` columns from the committed schema.
+
+Dry-run before applying:
+
+```bash
+node scripts/app-factory-job.mjs clean-stale-commands \
+  --older-than-hours 24 \
+  --dry-run
+```
+
+Apply after reviewing the dry-run:
+
+```bash
+node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24
+```
+
 ## Telegram Output Shape
 
 Every command returns JSON with a compact `telegram` field when applicable. Telegram should send that compact field, not the full database payload.
