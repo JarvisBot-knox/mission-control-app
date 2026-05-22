@@ -1,6 +1,6 @@
 # Mission Control App Factory Handoff
 
-Last updated: 2026-05-21
+Last updated: 2026-05-22
 
 ## Goal
 
@@ -32,7 +32,7 @@ Do not commit secrets. Basic Auth, Supabase service keys, Vercel tokens, and Ope
 - Telegram → OpenClaw `build-site` skill → `create-static-job` → Supabase → `app-factory-static-build.mjs` → generate from template → push to GitHub (JarvisBot-knox) → deploy to Vercel → live URL → recorded in Supabase
 
 **Scripts:**
-- `scripts/app-factory-job.mjs` — CLI: `create-static-job`, `process-commands`, `clean-stale-commands`, `run-hygiene`, `weekly-cost-summary`
+- `scripts/app-factory-job.mjs` — CLI: `create-static-job`, `record-*`, `process-commands`, `clean-stale-commands`
 - `scripts/app-factory-generate.mjs` — reads template, replaces `{{VAR}}` tokens, outputs files
 - `scripts/app-factory-github.mjs` — creates private JarvisBot-knox repo, pushes files via GitHub API (5-attempt retry for auto_init race)
 - `scripts/app-factory-vercel.mjs` — live deploy, polls until READY, writes result to file, records URL to Supabase
@@ -55,8 +55,8 @@ Do not commit secrets. Basic Auth, Supabase service keys, Vercel tokens, and Ope
 - `openclaw/ONBOARDING.md` — full system orientation
 
 **Hygiene:**
-- `supabase/migrations/20260520000100_hygiene_v01.sql` — retention policy, `run_hygiene_cleanup()` RPC
-- Needs `pnpm supabase:push` on Mac Mini to apply
+- `scripts/app-factory-healthcheck.mjs` — checks recorded live URLs and reports degraded URLs
+- `clean-stale-commands` — cancels pending Mission Control command requests older than the configured threshold
 
 ## Latest Verified Deployment
 
@@ -97,9 +97,9 @@ Design artifact (reference only):
    - `SUPABASE_URL` — `https://rqwcrtqnsupcpwmmaxye.supabase.co`
    - `SUPABASE_SERVICE_ROLE_KEY` — service role key (never commit)
    - `VERCEL_TEAM_ID` — if deploying under a team (optional)
-5. `pnpm supabase:push` — applies hygiene migration (`20260520000100_hygiene_v01.sql`)
-6. **Clean stale commands** — job `077e70b3-6d2d-49fd-a032-a948ceafe169` has stale pending `command_requests` in Supabase. Delete or ack them before running `process-commands` or the processor will pick them up and mutate live state.
-7. Dry-run the full pipeline: `node scripts/app-factory-static-build.mjs --dry-run --repo-name test-site-001 --job-id fake-id`
+5. `pnpm supabase:push` — applies committed migrations from `supabase/migrations/`
+6. **Clean stale commands** — dry-run first: `node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24 --dry-run`. If the output matches expectations, run without `--dry-run`.
+7. Dry-run the full pipeline: `node scripts/app-factory-static-build.mjs build --dry-run --repo-name test-site-001 --job-id fake-id`
 8. **Decide command processing cadence** — three options:
    - Manual: `node scripts/app-factory-job.mjs process-commands` on demand
    - Deterministic cron: add to HEARTBEAT.md (every 30 min alongside git pull)
@@ -126,13 +126,14 @@ pnpm collect:dry-run
 
 Note: `pnpm collect:dry-run` requires `/Users/knoxbot/.openclaw/workspace/SOUL.md` — Mac Mini only. All other commands pass on any machine.
 
-Last full validation: 2026-05-21
+Last full validation: 2026-05-22
 
-- `pnpm app-factory:test` — 5/5 pass
+- `pnpm app-factory:test` — 9/9 pass
 - `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts` — 6/6 pass
 - `pnpm lint` — clean
 - `pnpm typecheck` — clean
 - `pnpm --filter mission-control build` — success (all routes compile)
+- `pnpm collect:dry-run` — success on Mac Mini; OpenClaw gateway OK, 11 active sessions
 
 ## Key Files
 
@@ -145,7 +146,6 @@ Last full validation: 2026-05-21
 - `apps/mission-control/app/learnings/page.tsx`
 - `apps/mission-control/lib/mission-control-data.ts`
 - `apps/mission-control/app/actions.ts`
-- `scripts/app-factory-command-loop.mjs`
 - `scripts/app-factory-job.mjs`
 - `docs/OPENCLAW_APP_FACTORY_COMMANDS.md`
 - `docs/APP_FACTORY_WORKFLOW.md`
@@ -158,5 +158,5 @@ Last full validation: 2026-05-21
 Use this after cloning/pulling on another machine:
 
 ```text
-Pick up the Mission Control App Factory from docs/HANDOFF.md. Inspect git status, read apps/mission-control/ui-revamp-proposal.html, then continue the Mission Control UI conversion. Do not ask me to paste secrets.
+Pick up the Mission Control App Factory from docs/HANDOFF.md. Inspect git status, read README.md and docs/APP_FACTORY_WORKFLOW.md, then continue from the current Next Steps. Do not ask me to paste secrets and do not commit credentials.
 ```

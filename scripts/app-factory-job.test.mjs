@@ -72,3 +72,25 @@ test('run dry-run process-command classifies command requests', async () => {
   assert.equal(result.dryRun, true);
   assert.equal(result.operations[1].kind, 'approval');
 });
+
+test('clean-stale-commands dry-run matches command_requests schema', async () => {
+  const result = await run([
+    'clean-stale-commands',
+    '--older-than-hours',
+    '24',
+    '--dry-run',
+  ]);
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.queryField, 'requested_at');
+  assert.deepEqual(result.patch, {
+    status: 'canceled',
+    completed_at: '<now>',
+    error_message: 'auto-canceled: stale pending command',
+  });
+});
+
+test('run rejects removed hygiene commands', async () => {
+  await assert.rejects(() => run(['run-hygiene', '--dry-run']), /Unsupported App Factory command/);
+  await assert.rejects(() => run(['weekly-cost-summary', '--dry-run']), /Unsupported App Factory command/);
+});
