@@ -24,6 +24,14 @@ Once daily (e.g. at 3am), cancel command requests pending longer than 24 hours:
 Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24
 ```
 
+## App Factory Hygiene Audit
+Once daily after command cleanup, audit backend hygiene. This is dry-run/report-only by default:
+```
+Run: node /Users/knoxbot/mission-control-app-factory/scripts/app-factory-hygiene.mjs audit
+If stale approvals, old terminal jobs, old usage rows, unmanaged GitHub repos, or unmanaged Vercel projects are found, summarize counts in Telegram.
+Do not run clean/apply from heartbeat.
+```
+
 ## Weekly Health Check
 Once weekly (Sunday at 9am):
 ```

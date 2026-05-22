@@ -18,6 +18,26 @@
 - Template selection and generated-app evidence must follow `docs/TEMPLATE_CATALOG.md` and `docs/QUALITY_GATES.md`.
 - Approved detailed repair learnings should target `docs/TROUBLESHOOTING_PLAYBOOK.md` or another explicit reference doc instead of noisy durable memory.
 - Static generated-app execution must follow `docs/STATIC_APP_VERTICAL_SLICE.md`; real GitHub/Vercel side effects stay gated until build approval, deploy approval, source verification, and production environment verification are recorded.
+- Backend hygiene must run audit-first. `scripts/app-factory-hygiene.mjs audit` is report-only. Apply/clean mode is intentionally disabled until cleanup actions are atomic, externally reconciled, and explicitly approved. GitHub/Vercel resource deletion is not automatic.
+
+## Backend Hygiene
+
+Use hygiene to keep Supabase workflow state from accumulating stale control records:
+
+```bash
+node scripts/app-factory-hygiene.mjs audit
+```
+
+Current hygiene coverage:
+
+- recommends canceling stale pending `command_requests`
+- recommends expiring stale pending `job_approvals`
+- recommends archiving old failed/canceled `build_jobs`
+- recommends deleting old `usage_observations` past retention
+- reconciles recorded GitHub/Vercel resources against live external inventory when tokens are present
+- reports unmanaged GitHub repos and Vercel projects for manual review
+
+Hygiene does not mutate Supabase, delete GitHub repos, delete Vercel projects, delete production deployments, delete live jobs, delete apps, delete proof artifacts, or delete generated-app records. External resource deletion requires a separate explicit approval path.
 
 ## Current Key Placement
 
