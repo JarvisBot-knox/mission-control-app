@@ -57,6 +57,7 @@ Do not commit secrets. Basic Auth, Supabase service keys, Vercel tokens, and Ope
 **Hygiene:**
 - `scripts/app-factory-healthcheck.mjs` — checks recorded live URLs and reports degraded URLs
 - `clean-stale-commands` — cancels pending Mission Control command requests older than the configured threshold
+- `scripts/app-factory-hygiene.mjs` — audit-only backend hygiene for stale commands, stale approvals, old terminal jobs, old usage rows, and unmanaged GitHub/Vercel resource reports. Apply mode is intentionally disabled until cleanup actions are atomic and explicitly approved.
 
 ## Latest Verified Deployment
 
@@ -98,14 +99,15 @@ Design artifact (reference only):
    - `SUPABASE_SERVICE_ROLE_KEY` — service role key (never commit)
    - `VERCEL_TEAM_ID` — if deploying under a team (optional)
 5. `pnpm supabase:push` — applies committed migrations from `supabase/migrations/`
-6. **Clean stale commands** — dry-run first: `node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24 --dry-run`. If the output matches expectations, run without `--dry-run`.
-7. Dry-run the full pipeline: `node scripts/app-factory-static-build.mjs build --dry-run --repo-name test-site-001 --job-id fake-id`
-8. **Decide command processing cadence** — three options:
+6. **Audit backend hygiene** — `node scripts/app-factory-hygiene.mjs audit`. Review stale approvals, old jobs, old usage rows, and unmanaged GitHub/Vercel resources. Do not apply cleanup from hygiene yet; it is audit-only.
+7. **Clean stale commands** — dry-run first: `node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24 --dry-run`. If the output matches expectations, run without `--dry-run`.
+8. Dry-run the full pipeline: `node scripts/app-factory-static-build.mjs build --dry-run --repo-name test-site-001 --job-id fake-id`
+9. **Decide command processing cadence** — three options:
    - Manual: `node scripts/app-factory-job.mjs process-commands` on demand
    - Deterministic cron: add to HEARTBEAT.md (every 30 min alongside git pull)
    - Controlled OpenClaw job: OpenClaw triggers processing after build-site skill creates the job
-9. Fire first real Telegram test: `/build-site title="Test Site" description="Pipeline test" template=premium_static_app`
-10. Confirm live URL returns in Telegram and Mission Control shows the job trail
+10. Fire first real Telegram test: `/build-site title="Test Site" description="Pipeline test" template=premium_static_app`
+11. Confirm live URL returns in Telegram and Mission Control shows the job trail
 
 ## Gating Decision (After Mac Mini Validated)
 
@@ -128,7 +130,7 @@ Note: `pnpm collect:dry-run` requires `/Users/knoxbot/.openclaw/workspace/SOUL.m
 
 Last full validation: 2026-05-22
 
-- `pnpm app-factory:test` — 20/20 pass
+- `pnpm app-factory:test` — 25/25 pass
 - `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts` — 6/6 pass
 - `pnpm lint` — clean
 - `pnpm typecheck` — clean
@@ -147,6 +149,7 @@ Last full validation: 2026-05-22
 - `apps/mission-control/lib/mission-control-data.ts`
 - `apps/mission-control/app/actions.ts`
 - `scripts/app-factory-contract.mjs`
+- `scripts/app-factory-hygiene.mjs`
 - `scripts/app-factory-job.mjs`
 - `docs/OPENCLAW_APP_FACTORY_COMMANDS.md`
 - `docs/APP_FACTORY_WORKFLOW.md`

@@ -13,7 +13,8 @@ Before the pipeline can run, verify these are configured in the Vercel dashboard
 1. **Vercel GitHub Integration** — Go to Vercel dashboard → Settings → Git → connect JarvisBot-knox GitHub account. Without this, project creation via API returns 403.
 2. **GITHUB_TOKEN** — Personal access token for JarvisBot-knox with `repo` scope. Set in `.env.supabase`.
 3. **VERCEL_TOKEN** — API token from Vercel dashboard → Settings → Tokens. Set in `.env.supabase`.
-4. **Supabase migration applied** — Run `pnpm supabase:push` to apply all migrations including hygiene.
+4. **Supabase migrations applied** — Run `pnpm supabase:push` to apply committed migrations.
+5. **Backend hygiene checked** — Run `node scripts/app-factory-hygiene.mjs audit` before the first live build test.
 
 ## Repo Location
 
@@ -26,7 +27,8 @@ GitHub: `https://github.com/JarvisBot-knox/mission-control-app`
 |---|---|
 | `scripts/app-factory-job.mjs create-static-job` | Create a new build job in Supabase |
 | `scripts/app-factory-job.mjs process-commands` | Process pending command requests from Mission Control |
-| `scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24` | Expire stale pending commands |
+| `scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24` | Cancel stale pending commands |
+| `scripts/app-factory-hygiene.mjs audit` | Report stale backend records and unmanaged GitHub/Vercel resources |
 | `scripts/app-factory-static-build.mjs build --job-id {id}` | Run full pipeline: generate → GitHub → Vercel |
 | `scripts/collect-openclaw.mjs` | Snapshot OpenClaw state to Supabase |
 
@@ -57,7 +59,7 @@ Located in `/Users/knoxbot/mission-control-app-factory/.env.supabase`:
 
 See `openclaw/HEARTBEAT_INSTRUCTIONS.md` for the full schedule. Key cadence:
 - Every 30 min: pull latest repo, run collector, process commands
-- Daily 3am: clean stale commands
+- Daily 3am: clean stale commands, run backend hygiene audit
 
 ## Mission Control Dashboard
 
@@ -76,3 +78,4 @@ Located in `templates/` in the repo:
 2. Run `node scripts/app-factory-job.mjs process-commands` manually
 3. Check Supabase `build_jobs` table for job status
 4. For stale commands: `node scripts/app-factory-job.mjs clean-stale-commands --dry-run --older-than-hours 24`
+5. For backend cleanup: `node scripts/app-factory-hygiene.mjs audit`

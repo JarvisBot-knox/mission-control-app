@@ -15,6 +15,7 @@
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck",
     "factory:clean": "node scripts/app-factory-job.mjs clean-stale-commands --older-than-hours 24",
+    "factory:hygiene:audit": "node scripts/app-factory-hygiene.mjs audit",
     "factory:commands": "node scripts/app-factory-job.mjs process-commands",
     "factory:healthcheck": "node scripts/app-factory-healthcheck.mjs"
   },
