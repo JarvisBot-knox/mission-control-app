@@ -128,7 +128,7 @@ Note: `pnpm collect:dry-run` requires `/Users/knoxbot/.openclaw/workspace/SOUL.m
 
 Last full validation: 2026-05-22
 
-- `pnpm app-factory:test` — 13/13 pass
+- `pnpm app-factory:test` — 20/20 pass
 - `node --test apps/mission-control/app/actions.test.ts apps/mission-control/lib/mission-control-data.test.ts` — 6/6 pass
 - `pnpm lint` — clean
 - `pnpm typecheck` — clean
