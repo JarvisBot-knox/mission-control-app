@@ -68,6 +68,39 @@ export function resourcePlan(input) {
   };
 }
 
+export function resourceClaimPlan(input) {
+  const plan = resourcePlan({
+    ...input,
+    status: input.status || 'planned',
+    metadata: {
+      claimStatus: input.claimStatus || input.status || 'planned',
+      idempotencyKey: input.idempotencyKey || null,
+      cleanupPolicy: input.cleanupPolicy || 'manual_approval_required',
+      ...(input.metadata || {}),
+    },
+  });
+
+  return {
+    ...plan,
+    resource: {
+      ...plan.resource,
+      external_id: input.externalId || input.idempotencyKey || null,
+    },
+  };
+}
+
+export function resourceClaimPatch(status, metadata = {}, fields = {}) {
+  return {
+    ...fields,
+    status,
+    metadata: {
+      claimStatus: status,
+      cleanupPolicy: 'manual_approval_required',
+      ...metadata,
+    },
+  };
+}
+
 export function artifactPlan(input) {
   if (!input.buildJobId) throw new Error('buildJobId is required');
   if (!ARTIFACT_TYPES.has(input.artifactType)) throw new Error(`Unsupported artifact type: ${input.artifactType}`);

@@ -115,6 +115,14 @@ Generated app resources are tracked separately from the controlling Mission Cont
 
 Raw secrets are never stored in Mission Control tables. Store only metadata such as provider, secret name, environment, placement, status, and timestamps.
 
+External side effects must be claim-first:
+
+- record an `app_resources` claim with status `creating` before creating a GitHub repo, Vercel project, deployment, Supabase project, domain, or other external resource
+- include an idempotency key in metadata and `external_id` when the provider ID is not known yet
+- mark the claim `created` with the provider ID and URL after success
+- mark the claim `record_failed` with the failure stage and sanitized error if the provider call fails
+- require explicit approval before deleting or mutating live external resources during cleanup
+
 ## Preview And Production
 
 The deploy approval is tied to a reviewed preview and evidence package:

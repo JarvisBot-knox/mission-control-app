@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import {
@@ -13,7 +13,7 @@ import { vercelPreviewPlan, vercelProductionPlan } from './app-factory-vercel.mj
 
 export { artifactPlan, milestonePlan, resourcePlan, slugify };
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -161,13 +161,19 @@ export function staticVerticalSlicePlan(input) {
   };
 }
 
-async function runScript(cmd, dryRun) {
+function shellDisplayArg(value) {
+  const text = String(value);
+  return /^[a-zA-Z0-9_./:=@-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+async function runNodeScript(scriptPath, args, dryRun) {
+  const display = [process.execPath, scriptPath, ...args].map(shellDisplayArg).join(' ');
   if (dryRun) {
-    console.log(`[dry-run] Would run: ${cmd}`);
+    console.log(`[dry-run] Would run: ${display}`);
     return '';
   }
-  console.log(`[exec] ${cmd}`);
-  const { stdout, stderr } = await execAsync(cmd, { env: process.env });
+  console.log(`[exec] ${display}`);
+  const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, ...args], { env: process.env });
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
   return stdout;
@@ -175,16 +181,16 @@ async function runScript(cmd, dryRun) {
 
 async function recordMilestone(jobId, stage, status, title, detail, jobStatus, dryRun) {
   const args = [
-    `node scripts/app-factory-job.mjs record-milestone`,
-    `--job-id ${jobId}`,
-    `--stage ${stage}`,
-    `--status ${status}`,
-    `--title "${title.replace(/"/g, '\\"')}"`,
+    'record-milestone',
+    '--job-id', jobId,
+    '--stage', stage,
+    '--status', status,
+    '--title', title,
   ];
-  if (detail) args.push(`--detail "${detail.replace(/"/g, '\\"')}"`);
-  if (jobStatus) args.push(`--job-status ${jobStatus}`);
+  if (detail) args.push('--detail', detail);
+  if (jobStatus) args.push('--job-status', jobStatus);
   if (dryRun) args.push('--dry-run');
-  await runScript(args.join(' '), false);
+  await runNodeScript('scripts/app-factory-job.mjs', args, false);
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -245,26 +251,32 @@ async function runLiveBuild(flags) {
     // Step 1: Generate
     currentStep = 'generate';
     await recordMilestone(jobId, 'build', 'in_progress', 'Generating site files', template, 'building', false);
-    await runScript(
-      `node scripts/app-factory-generate.mjs --template ${template} --output-dir ${outputDir} --vars '${vars}'`,
-      false
-    );
+    await runNodeScript('scripts/app-factory-generate.mjs', [
+      '--template', template,
+      '--output-dir', outputDir,
+      '--vars', vars,
+    ], false);
 
     // Step 2: GitHub
     currentStep = 'github';
-    await runScript(
-      `node scripts/app-factory-github.mjs --repo-name ${repoName} --source-dir ${outputDir} --job-id ${jobId} --app-slug ${appSlug}`,
-      false
-    );
+    await runNodeScript('scripts/app-factory-github.mjs', [
+      '--repo-name', repoName,
+      '--source-dir', outputDir,
+      '--job-id', jobId,
+      '--app-slug', appSlug,
+    ], false);
 
     // Step 3: Vercel preview
     currentStep = 'vercel-preview';
     await recordMilestone(jobId, 'preview', 'in_progress', 'Deploying preview', null, null, false);
     const previewResultFile = `/tmp/jarvis-vercel-result-${jobId}-preview.json`;
-    await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env preview --app-slug ${appSlug} --result-file ${previewResultFile}`,
-      false
-    );
+    await runNodeScript('scripts/app-factory-vercel.mjs', [
+      '--repo-name', repoName,
+      '--job-id', jobId,
+      '--env', 'preview',
+      '--app-slug', appSlug,
+      '--result-file', previewResultFile,
+    ], false);
     let previewUrl;
     try {
       const previewResultRaw = await readFile(previewResultFile, 'utf8');
@@ -324,10 +336,13 @@ async function runLiveBuild(flags) {
     currentStep = 'vercel-production';
     await recordMilestone(jobId, 'deploy', 'in_progress', 'Deploying to production', null, 'deploying', false);
     const prodResultFile = `/tmp/jarvis-vercel-result-${jobId}-production.json`;
-    await runScript(
-      `node scripts/app-factory-vercel.mjs --repo-name ${repoName} --job-id ${jobId} --env production --app-slug ${appSlug} --result-file ${prodResultFile}`,
-      false
-    );
+    await runNodeScript('scripts/app-factory-vercel.mjs', [
+      '--repo-name', repoName,
+      '--job-id', jobId,
+      '--env', 'production',
+      '--app-slug', appSlug,
+      '--result-file', prodResultFile,
+    ], false);
     let productionUrl;
     try {
       const prodResultRaw = await readFile(prodResultFile, 'utf8');
@@ -340,12 +355,12 @@ async function runLiveBuild(flags) {
     // Step 7: Record final URL
     currentStep = 'record-final-url';
     const finalArgs = [
-      `node scripts/app-factory-job.mjs record-final-url`,
-      `--job-id ${jobId}`,
-      `--url "${(productionUrl || '').replace(/"/g, '\\"')}"`,
-      `--name "${title.replace(/"/g, '\\"')}"`,
+      'record-final-url',
+      '--job-id', jobId,
+      '--url', productionUrl || '',
+      '--name', title,
     ];
-    await runScript(finalArgs.join(' '), false);
+    await runNodeScript('scripts/app-factory-job.mjs', finalArgs, false);
 
     return { status: 'live', productionUrl, previewUrl };
   } catch (error) {
