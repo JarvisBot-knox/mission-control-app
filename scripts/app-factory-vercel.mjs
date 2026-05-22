@@ -4,6 +4,8 @@ import { writeFile } from 'node:fs/promises';
 import {
   artifactPlan,
   finalUrlPlan,
+  resourceClaimPatch,
+  resourceClaimPlan,
   resourcePlan,
 } from './app-factory-contract.mjs';
 
@@ -74,6 +76,22 @@ async function supabaseFetch(supabaseUrl, serviceRoleKey, path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function insertSupabase(supabaseUrl, serviceRoleKey, table, row) {
+  return supabaseFetch(supabaseUrl, serviceRoleKey, table, {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(row),
+  });
+}
+
+async function patchSupabaseById(supabaseUrl, serviceRoleKey, table, id, patch) {
+  return supabaseFetch(supabaseUrl, serviceRoleKey, `${table}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(patch),
+  });
+}
+
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -90,6 +108,10 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
 
   const projectName = repoName;
   const GITHUB_ORG = 'JarvisBot-knox';
+  const projectIdempotencyKey = `vercel:project:${projectName}`;
+  const deploymentIdempotencyKey = `vercel:${env}:${projectName}`;
+  let projectClaimId = null;
+  let deploymentClaimId = null;
 
   if (dryRun) {
     console.log(`[dry-run] Would create Vercel project: ${projectName}`);
@@ -100,6 +122,24 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
       console.log(`[dry-run] Would record proof_artifacts row for deployment URL`);
     }
     return { dryRun: true, deploymentUrl: `https://${projectName}.vercel.app` };
+  }
+
+  if (jobId && supabaseUrl && serviceRoleKey) {
+    const [projectClaim] = await insertSupabase(supabaseUrl, serviceRoleKey, 'app_resources', resourceClaimPlan({
+      buildJobId: jobId,
+      resourceType: 'vercel_project',
+      provider: 'vercel',
+      name: projectName,
+      status: 'creating',
+      claimStatus: 'creating',
+      idempotencyKey: projectIdempotencyKey,
+      metadata: {
+        repoName,
+        environment: env,
+      },
+    }).resource);
+    projectClaimId = projectClaim?.id || null;
+    console.log(`[vercel] Recorded creating project claim`);
   }
 
   console.log(`[vercel] Creating project: ${projectName}`);
@@ -121,25 +161,74 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
       console.log(`[vercel] Project already exists, fetching: ${projectName}`);
       project = await vercelFetch(`/v9/projects/${encodeURIComponent(projectName)}`, { method: 'GET' }, vercelToken, teamId);
     } else {
+      if (projectClaimId && supabaseUrl && serviceRoleKey) {
+        await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', projectClaimId, resourceClaimPatch('record_failed', {
+          idempotencyKey: projectIdempotencyKey,
+          error: error instanceof Error ? error.message : String(error),
+          failedStage: 'vercel_project_create',
+        }));
+      }
       throw error;
     }
   }
 
-  console.log(`[vercel] Triggering deployment (env: ${env})`);
-  const deployment = await vercelFetch('/v13/deployments', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: projectName,
-      gitSource: {
-        type: 'github',
-        org: GITHUB_ORG,
-        repo: repoName,
-        ref: 'main',
-      },
-      target: env === 'production' ? 'production' : undefined,
+  if (projectClaimId && supabaseUrl && serviceRoleKey) {
+    await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', projectClaimId, resourceClaimPatch('created', {
+      idempotencyKey: projectIdempotencyKey,
       projectId: project.id,
-    }),
-  }, vercelToken, teamId);
+      projectName,
+    }, {
+      external_id: project.id || projectIdempotencyKey,
+    }));
+  }
+
+  if (jobId && supabaseUrl && serviceRoleKey) {
+    const [deploymentClaim] = await insertSupabase(supabaseUrl, serviceRoleKey, 'app_resources', resourceClaimPlan({
+      buildJobId: jobId,
+      resourceType: env === 'production' ? 'vercel_production_deployment' : 'vercel_preview_deployment',
+      provider: 'vercel',
+      name: `${projectName} ${env}`,
+      environment: env,
+      status: 'creating',
+      claimStatus: 'creating',
+      idempotencyKey: deploymentIdempotencyKey,
+      metadata: {
+        projectId: project.id,
+        projectName,
+        repoName,
+      },
+    }).resource);
+    deploymentClaimId = deploymentClaim?.id || null;
+    console.log(`[vercel] Recorded creating deployment claim`);
+  }
+
+  console.log(`[vercel] Triggering deployment (env: ${env})`);
+  let deployment;
+  try {
+    deployment = await vercelFetch('/v13/deployments', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: projectName,
+        gitSource: {
+          type: 'github',
+          org: GITHUB_ORG,
+          repo: repoName,
+          ref: 'main',
+        },
+        target: env === 'production' ? 'production' : undefined,
+        projectId: project.id,
+      }),
+    }, vercelToken, teamId);
+  } catch (error) {
+    if (deploymentClaimId && supabaseUrl && serviceRoleKey) {
+      await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', deploymentClaimId, resourceClaimPatch('record_failed', {
+        idempotencyKey: deploymentIdempotencyKey,
+        error: error instanceof Error ? error.message : String(error),
+        failedStage: 'vercel_deployment_create',
+      }));
+    }
+    throw error;
+  }
 
   const deploymentId = deployment.id;
   console.log(`[vercel] Deployment started: ${deploymentId}`);
@@ -157,10 +246,28 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
   }
 
   if (finalState === 'ERROR' || finalState === 'CANCELED') {
+    if (deploymentClaimId && supabaseUrl && serviceRoleKey) {
+      await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', deploymentClaimId, resourceClaimPatch('record_failed', {
+        idempotencyKey: deploymentIdempotencyKey,
+        deploymentId,
+        deploymentUrl,
+        finalState,
+        failedStage: 'vercel_deployment_poll',
+      }));
+    }
     throw new Error(`Vercel deployment failed with state: ${finalState}`);
   }
 
   if (finalState !== 'READY') {
+    if (deploymentClaimId && supabaseUrl && serviceRoleKey) {
+      await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', deploymentClaimId, resourceClaimPatch('record_failed', {
+        idempotencyKey: deploymentIdempotencyKey,
+        deploymentId,
+        deploymentUrl,
+        finalState,
+        failedStage: 'vercel_deployment_timeout',
+      }));
+    }
     throw new Error(`Vercel deployment timed out after ${MAX_POLLS} polls. Last state: ${finalState}`);
   }
 
@@ -172,6 +279,19 @@ export async function deployToVercel({ repoName, jobId, env = 'preview', dryRun 
   }
 
   if (jobId && supabaseUrl && serviceRoleKey && deploymentUrl) {
+    if (deploymentClaimId) {
+      await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', deploymentClaimId, resourceClaimPatch('created', {
+        idempotencyKey: deploymentIdempotencyKey,
+        deploymentId,
+        deploymentUrl,
+        finalState,
+        projectId: project.id,
+      }, {
+        external_id: deploymentId,
+        url: deploymentUrl,
+      }));
+    }
+
     const summary = env === 'production'
       ? `Vercel production deployment: ${deploymentUrl}`
       : `Vercel preview deployment: ${deploymentUrl}`;

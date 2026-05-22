@@ -14,6 +14,7 @@
 - App Factory risky actions require explicit approval: infrastructure creation/deletion, Supabase project creation, secret/env changes, public data exposure, public writes, auth/user data, production deploys, custom domains, paid APIs, cron/background jobs, email/SMS, payments, scraping, or external side effects.
 - App Factory repair loops must stay surgical and pause before changing approved scope or adding risk.
 - Backend additions should preserve the clean workflow tree. Do not add duplicate stores, duplicate approval paths, or disconnected resource tracking without documenting why the existing structure cannot hold the new branch.
+- External provider calls must be claim-first: write an `app_resources` claim before creating GitHub/Vercel/Supabase resources, then update the same claim to `created` or `record_failed`.
 - Reusable learnings must be proposed and approved before writing to OpenClaw memory or troubleshooting docs.
 - Template selection and generated-app evidence must follow `docs/TEMPLATE_CATALOG.md` and `docs/QUALITY_GATES.md`.
 - Approved detailed repair learnings should target `docs/TROUBLESHOOTING_PLAYBOOK.md` or another explicit reference doc instead of noisy durable memory.

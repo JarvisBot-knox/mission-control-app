@@ -2,6 +2,7 @@
 import { pathToFileURL } from 'node:url';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { resourceClaimPatch, resourceClaimPlan } from './app-factory-contract.mjs';
 
 const GITHUB_ORG = 'JarvisBot-knox';
 
@@ -69,6 +70,22 @@ async function supabaseFetch(supabaseUrl, serviceRoleKey, path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function insertSupabase(supabaseUrl, serviceRoleKey, table, row) {
+  return supabaseFetch(supabaseUrl, serviceRoleKey, table, {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(row),
+  });
+}
+
+async function patchSupabaseById(supabaseUrl, serviceRoleKey, table, id, patch) {
+  return supabaseFetch(supabaseUrl, serviceRoleKey, `${table}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(patch),
+  });
+}
+
 export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = false }) {
   if (!repoName) throw new Error('--repo-name is required');
   if (!sourceDir) throw new Error('--source-dir is required');
@@ -80,6 +97,8 @@ export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = fa
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   const files = await readdir(sourceDir);
+  const idempotencyKey = `github:${GITHUB_ORG}/${repoName}`;
+  let claimId = null;
 
   if (dryRun) {
     console.log(`[dry-run] Would create private repo: ${GITHUB_ORG}/${repoName}`);
@@ -96,11 +115,41 @@ export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = fa
     };
   }
 
+  if (jobId && supabaseUrl && serviceRoleKey) {
+    const [claim] = await insertSupabase(supabaseUrl, serviceRoleKey, 'app_resources', resourceClaimPlan({
+      buildJobId: jobId,
+      resourceType: 'github_repo',
+      provider: 'github',
+      name: `${GITHUB_ORG}/${repoName}`,
+      status: 'creating',
+      claimStatus: 'creating',
+      idempotencyKey,
+      metadata: {
+        repoName,
+        org: GITHUB_ORG,
+      },
+    }).resource);
+    claimId = claim?.id || null;
+    console.log(`[github] Recorded creating app_resources claim`);
+  }
+
   console.log(`[github] Creating private repo: ${GITHUB_ORG}/${repoName}`);
-  const repo = await githubFetch('/user/repos', {
-    method: 'POST',
-    body: JSON.stringify({ name: repoName, private: true, auto_init: true }),
-  }, githubToken);
+  let repo;
+  try {
+    repo = await githubFetch('/user/repos', {
+      method: 'POST',
+      body: JSON.stringify({ name: repoName, private: true, auto_init: true }),
+    }, githubToken);
+  } catch (error) {
+    if (claimId && supabaseUrl && serviceRoleKey) {
+      await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', claimId, resourceClaimPatch('record_failed', {
+        idempotencyKey,
+        error: error instanceof Error ? error.message : String(error),
+        failedStage: 'github_repo_create',
+      }));
+    }
+    throw error;
+  }
 
   const defaultBranch = repo.default_branch || 'main';
 
@@ -165,21 +214,18 @@ export async function createGithubRepo({ repoName, sourceDir, jobId, dryRun = fa
   const repoUrl = repo.html_url;
   const cloneUrl = repo.clone_url;
 
-  if (jobId && supabaseUrl && serviceRoleKey) {
-    await supabaseFetch(supabaseUrl, serviceRoleKey, 'app_resources', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        build_job_id: jobId,
-        resource_type: 'github_repo',
-        provider: 'github',
-        name: `${GITHUB_ORG}/${repoName}`,
-        url: repoUrl,
-        status: 'created',
-        metadata: { html_url: repoUrl, clone_url: cloneUrl },
-      }),
-    });
-    console.log(`[github] Recorded app_resources row`);
+  if (jobId && supabaseUrl && serviceRoleKey && claimId) {
+    await patchSupabaseById(supabaseUrl, serviceRoleKey, 'app_resources', claimId, resourceClaimPatch('created', {
+      idempotencyKey,
+      html_url: repoUrl,
+      clone_url: cloneUrl,
+      defaultBranch,
+      repoFullName: `${GITHUB_ORG}/${repoName}`,
+    }, {
+      url: repoUrl,
+      external_id: repo.id ? String(repo.id) : idempotencyKey,
+    }));
+    console.log(`[github] Updated app_resources claim`);
   }
 
   console.log(`[github] Repo ready: ${repoUrl}`);
